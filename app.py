@@ -1,6 +1,3 @@
-import ocr_processor
-import data_analysis
-import import_template
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -16,8 +13,11 @@ import plotly.express as px
 import plotly.graph_objects as go
 from PIL import Image
 from datetime import datetime, timedelta
-import matplotlib.pyplot as plt
-import seaborn as sns
+
+# Local module imports
+import ocr_processor
+import data_analysis
+import import_template
 
 # Optional libraries for PDF/image processing
 try:
