@@ -8,8 +8,7 @@ Pillow
 matplotlib
 seaborn
 openai==0.28
-
-# Optional OCR / PDF → image processing
+openpyxl
 pytesseract
 pdf2image
 opencv-python
