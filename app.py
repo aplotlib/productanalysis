@@ -488,7 +488,7 @@ def call_openai_api(messages, temperature=0.7, max_tokens=1024, model="gpt-4o", 
         # If we have image data, add it to the message content
         if image_data and isinstance(messages, list) and len(messages) > 0:
             # Use GPT-4 with vision capabilities - use latest model (not the deprecated preview)
-            vision_model = "gpt-4-vision" # Updated from deprecated gpt-4-vision-preview
+            vision_model = "gpt-4o" # Updated from deprecated gpt-4-vision-preview
             
             # Encode the image data
             if isinstance(image_data, bytes):
