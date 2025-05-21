@@ -1,0 +1,11 @@
+streamlit
+pandas
+numpy
+requests
+plotly
+Pillow
+matplotlib
+seaborn
+pytesseract
+pdf2image
+opencv-python
