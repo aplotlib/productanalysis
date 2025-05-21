@@ -1,3 +1,6 @@
+import ocr_processor
+import data_analysis
+import import_template
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -225,110 +228,21 @@ def to_excel(df: pd.DataFrame, sheet_name='Product Analysis'):
 
 def create_sample_import_template():
     """Create a sample import template for users to download."""
-    df = pd.DataFrame({
-        "SKU*": ["MOB1116BLU", "BAT2234RED"],
-        "ASIN*": ["B0DT7NW5VY", "B0DT8XYZ123"],
-        "Product Name": ["Tri-Rollator With Seat", "Vive Shower Chair"],
-        "Category": ["Mobility Aids", "Bathroom Safety"],
-        "Last 30 Days Sales*": [491, 325],
-        "Last 30 Days Returns*": [10, 8],
-        "Last 365 Days Sales": [5840, 3900],
-        "Last 365 Days Returns": [67, 45],
-        "Star Rating": [3.9, 4.2],
-        "Total Reviews": [20, 35],
-        "Average Price": [89.99, 59.99]
-    })
-    return to_excel(df, "Import Template")
+    return import_template.create_import_template()
 
 #=========================================================================
 # File Processing Functions
 #=========================================================================
-def process_excel_or_csv(uploaded_file):
-    """Process uploaded Excel or CSV file."""
-    try:
-        # Determine file type by extension
-        file_ext = uploaded_file.name.split('.')[-1].lower()
-        
-        if file_ext == 'csv':
-            df = pd.read_csv(uploaded_file)
-        elif file_ext in ['xlsx', 'xls']:
-            df = pd.read_excel(uploaded_file)
-        else:
-            return None, f"Unsupported file format: {file_ext}. Please upload CSV or Excel files."
-        
-        # Validate required columns
-        required_columns = ['ASIN', 'Last 30 Days Sales', 'Last 30 Days Returns']
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        
-        if missing_columns:
-            return None, f"Missing required columns: {', '.join(missing_columns)}"
-        
-        return df, None
-    except Exception as e:
-        logger.error(f"Error processing Excel/CSV file: {str(e)}")
-        return None, f"Error processing file: {str(e)}"
-
 def process_pdf_with_ocr(pdf_file):
-    """Extract text from PDF using OCR."""
-    if not OCR_AVAILABLE:
-        return "OCR libraries not available. Please install pytesseract and pdf2image."
+    pdf_bytes = pdf_file.read()
+    return ocr_processor.process_pdf_with_ocr(pdf_bytes)
     
-    try:
-        # Read file bytes
-        pdf_bytes = pdf_file.read()
-        
-        # Convert PDF to images
-        with tempfile.TemporaryDirectory() as path:
-            images = convert_from_bytes(pdf_bytes, dpi=300, output_folder=path)
-            
-            # Extract text from each image
-            text_content = []
-            for img in images:
-                text = pytesseract.image_to_string(img)
-                text_content.append(text)
-        
-        return "\n".join(text_content)
-    except Exception as e:
-        logger.error(f"Error processing PDF with OCR: {str(e)}")
-        return f"Error processing PDF: {str(e)}"
-
 def process_image_with_ocr(image_file):
-    """Extract text from image using OCR."""
-    if not OCR_AVAILABLE:
-        return "OCR libraries not available. Please install pytesseract."
+    image_bytes = image_file.read()
+    return ocr_processor.process_image_with_ocr(image_bytes)
     
-    try:
-        # Open image file
-        img = Image.open(image_file)
-        
-        # Convert to text using OCR
-        text = pytesseract.image_to_string(img)
-        return text
-    except Exception as e:
-        logger.error(f"Error processing image with OCR: {str(e)}")
-        return f"Error processing image: {str(e)}"
-
 def extract_reviews_from_ocr(ocr_text):
-    """Extract structured review data from OCR text."""
-    # This is a placeholder function that would need to be customized 
-    # based on the exact format of the OCR output
-    reviews = []
-    
-    # Example pattern for extracting reviews (would need to be adjusted)
-    order_pattern = r"Order ID:\s+([A-Za-z0-9\-]+)"
-    comment_pattern = r"Buyer Comment:\s+(.*?)(?:Request Date|$)"
-    
-    order_ids = re.findall(order_pattern, ocr_text)
-    comments = re.findall(comment_pattern, ocr_text, re.DOTALL)
-    
-    # Match order IDs with comments when possible
-    for i in range(min(len(order_ids), len(comments))):
-        reviews.append({
-            "order_id": order_ids[i],
-            "comment": comments[i].strip(),
-        })
-    
-    return reviews
+    return ocr_processor.extract_amazon_reviews_data(ocr_text)
 
 #=========================================================================
 # Analysis Functions
