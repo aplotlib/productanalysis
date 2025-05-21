@@ -1034,13 +1034,13 @@ def main():
             
             # Note: need to rerun to apply the theme change
             if st.button("Apply Theme"):
-                st.experimental_rerun()
+                st.rerun()
         
         # 1-click example loader
         if st.button("Load Example Data", type="primary"):
             st.session_state.uploaded_files = EXAMPLE_DATA.copy()
             st.success("Example data loaded!")
-            st.experimental_rerun()
+            st.rerun()
         
         # Show available modules
         with st.expander("Available Modules"):
@@ -2108,7 +2108,7 @@ def render_listing_optimization():
                         st.session_state.uploaded_files['structured_data'] = df
                     
                     st.success("Listing content updated!")
-                    st.experimental_rerun()
+                    st.rerun()
         
         # AI analysis button
         if st.button("Generate AI Optimization Recommendations", type="primary"):
@@ -2333,7 +2333,7 @@ def render_ai_insights():
                 # Find the product info from analysis results
                 if selected_asin in st.session_state.analysis_results:
                     st.session_state.current_product = st.session_state.analysis_results[selected_asin]['product_info']
-                    st.experimental_rerun()
+                    st.rerun()
                 else:
                     st.error("Product information not found. Please run a standard analysis first.")
         else:
