@@ -6,6 +6,5 @@ plotly>=5.18.0
 requests>=2.31.0
 pillow>=10.1.0
 xlsxwriter>=3.1.0
-poppler
 pytesseract>=0.3.10 
 pdf2image>=1.16.3
