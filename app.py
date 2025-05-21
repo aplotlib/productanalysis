@@ -200,6 +200,9 @@ for key in ['analysis_results', 'uploaded_files', 'current_product', 'ai_insight
         st.session_state[key] = {} if key in ['analysis_results', 'uploaded_files', 'ai_insights'] else (
             None if key == 'current_product' else 0 if key == 'ai_api_calls' else False
         )
+# Initialize theme mode session state
+if 'theme_mode' not in st.session_state:
+    st.session_state.theme_mode = 'dark'  # Default to dark mode
 
 # Set up custom Streamlit theme with cyberpunk aesthetics
 def set_cyberpunk_theme():
