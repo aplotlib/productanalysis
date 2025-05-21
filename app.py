@@ -1,4 +1,41 @@
-import streamlit as st
+# Basic test to verify API key works
+def test_openai_api():
+    """Test if the OpenAI API key works with a minimal request"""
+    global api_key
+    
+    if not api_key or not AVAILABLE_MODULES['requests']:
+        return False
+    
+    try:
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}"
+        }
+        
+        payload = {
+            "model": "gpt-4o",
+            "messages": [{"role": "user", "content": "Hello"}],
+            "max_tokens": 5,
+            "temperature": 0.7
+        }
+        
+        response = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers=headers,
+            data=json.dumps(payload),
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            logger.info("OpenAI API test successful")
+            return True
+        else:
+            logger.error(f"OpenAI API test failed: {response.status_code} - {response.text}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Error testing OpenAI API: {str(e)}")
+        return Falseimport streamlit as st
 import pandas as pd
 import numpy as np
 import io
@@ -61,7 +98,7 @@ try:
 except ImportError:
     logger.warning("PIL module not available")
 
-# Try importing requests
+# Try importing requests - will be needed for direct API calls
 try:
     import requests
     AVAILABLE_MODULES['requests'] = True
@@ -83,30 +120,36 @@ try:
 except ImportError:
     logger.warning("OCR modules not available")
 
-# Try importing OpenAI - for AI analysis
+# Try OpenAI API integration with direct HTTP requests
+api_key = None
 try:
-    import openai
-    from openai import OpenAI  # Import the OpenAI client class for newer SDK
-    
-    # Get API key directly from Streamlit secrets
-    try:
-        api_key = st.secrets["openai_api_key"]
-        
-        # Set up the client - works with both legacy and new SDK
-        if hasattr(openai, 'OpenAI'):  # Check if using newer OpenAI SDK (v1.0.0+)
-            client = OpenAI(api_key=api_key)
+    # Try to get from streamlit secrets directly - case sensitive!
+    api_key = st.secrets.get("openai_api_key", None)
+    if api_key:
+        logger.info("Found openai_api_key in Streamlit secrets")
+        AVAILABLE_MODULES['ai_api'] = True
+    else:
+        # Try alternate capitalizations
+        api_key = st.secrets.get("OPENAI_API_KEY", None)
+        if api_key:
+            logger.info("Found OPENAI_API_KEY in Streamlit secrets")
             AVAILABLE_MODULES['ai_api'] = True
-            logger.info("OpenAI API client initialized successfully from secrets")
-        else:  # Legacy SDK (<v1.0.0)
-            openai.api_key = api_key
-            AVAILABLE_MODULES['ai_api'] = True
-            logger.info("OpenAI API initialized successfully from secrets (legacy)")
-    except Exception as e:
-        logger.warning(f"OpenAI API key not found in Streamlit secrets as 'openai_api_key': {str(e)}")
-except ImportError:
-    logger.warning("OpenAI module not available")
+        else:
+            # Last resort - try environment variable
+            api_key = os.environ.get("OPENAI_API_KEY", None)
+            if api_key:
+                logger.info("Found OPENAI_API_KEY in environment variables")
+                AVAILABLE_MODULES['ai_api'] = True
+            else:
+                logger.warning("OpenAI API key not found in any location")
 except Exception as e:
-    logger.error(f"Error initializing OpenAI: {str(e)}")
+    logger.error(f"Error accessing OpenAI API key: {str(e)}")
+    
+# Debug output to console
+if api_key:
+    logger.info(f"API key found: {api_key[:5]}...{api_key[-4:]}")
+else:
+    logger.warning("No API key found")
 
 # Try importing local modules - use safe imports
 try:
@@ -219,7 +262,13 @@ if AVAILABLE_MODULES['ai_api']:
         Returns:
         - Dictionary with analysis results
         """
+        global api_key
+        
         try:
+            if not api_key:
+                logger.warning("OpenAI API key not available for analysis")
+                return {"success": False, "error": "API key not available"}
+                
             prompt = ""
             if analysis_type == 'sentiment':
                 prompt = f"""Analyze the sentiment of this Amazon review for a medical device. 
@@ -269,6 +318,10 @@ if AVAILABLE_MODULES['ai_api']:
                 {"role": "system", "content": "You are an expert Amazon listing optimization specialist who helps medical device companies maximize their e-commerce sales and minimize returns."},
                 {"role": "user", "content": prompt}
             ]
+            
+            if not AVAILABLE_MODULES.get('requests', False):
+                logger.error("requests module is required for API calls")
+                return {"success": False, "error": "requests module not available"}
             
             # API call with direct request to OpenAI
             headers = {
@@ -480,9 +533,30 @@ def main():
                 st.session_state.ai_api_calls = 0
             
             st.metric("AI API Calls", st.session_state.ai_api_calls)
+            
+            # Add a test button
+            if st.button("Test API Connection"):
+                with st.spinner("Testing API connection..."):
+                    if test_openai_api():
+                        st.success("✅ API connection successful!")
+                    else:
+                        st.error("❌ API connection failed. Check logs for details.")
         else:
             st.error("❌ OpenAI API not configured")
             st.info("API key should be named 'openai_api_key' in your Streamlit app settings")
+            
+            # Add manual entry option for debugging
+            with st.expander("Debug API Connection"):
+                temp_key = st.text_input("Enter API Key for testing", type="password")
+                if temp_key and st.button("Test Key"):
+                    global api_key
+                    api_key = temp_key
+                    with st.spinner("Testing API connection..."):
+                        if test_openai_api():
+                            st.success("✅ Key works! Use this key in your Streamlit settings.")
+                        else:
+                            st.error("❌ Key doesn't work. Check if it's valid.")
+    
     
     # Main content tabs
     tabs = st.tabs(["Import", "Analyze", "Listing Optimization", "AI Insights", "Help"])
