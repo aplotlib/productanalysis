@@ -33,6 +33,9 @@ def test_openai_api():
             logger.error(f"OpenAI API test failed: {response.status_code} - {response.text}")
             return False
             
+    except Exception as e:
+        logger.error(f"Error testing OpenAI API: {str(e)}")
+        return Falseimport streamlit as st
 import pandas as pd
 import numpy as np
 import io
@@ -141,6 +144,7 @@ try:
                 logger.warning("OpenAI API key not found in any location")
 except Exception as e:
     logger.error(f"Error accessing OpenAI API key: {str(e)}")
+    api_key = None
     
 # Debug output to console
 if api_key:
