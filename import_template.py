@@ -1,5 +1,17 @@
-import pandas as pd
 import io
+import pandas as pd
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Check if xlsx writer is available
+XLSX_AVAILABLE = False
+try:
+    import xlsxwriter
+    XLSX_AVAILABLE = True
+    logger.info("XlsxWriter is available for Excel output")
+except ImportError:
+    logger.warning("XlsxWriter is not available, Excel formatting will be limited")
 
 def create_import_template():
     """Create a sample import template for users to download."""
@@ -23,59 +35,64 @@ def create_import_template():
     
     # Create Excel binary
     output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, sheet_name='Import Template', index=False)
-        
-        # Format the Excel sheet
-        workbook = writer.book
-        worksheet = writer.sheets['Import Template']
-        
-        # Format for headers
-        header_format = workbook.add_format({
-            'bold': True,
-            'text_wrap': True,
-            'valign': 'top',
-            'fg_color': '#D7E4BC',
-            'border': 1
-        })
-        
-        # Apply header format
-        for col_num, value in enumerate(df.columns.values):
-            worksheet.write(0, col_num, value, header_format)
-        
-        # Make mandatory columns stand out
-        required_format = workbook.add_format({
-            'fg_color': '#FFEB9C',
-            'border': 1
-        })
-        
-        # Format required columns
-        required_cols = ['ASIN*', 'Last 30 Days Sales*', 'Last 30 Days Returns*']
-        for col in required_cols:
-            col_idx = df.columns.get_loc(col)
-            worksheet.set_column(col_idx, col_idx, None, required_format)
-        
-        # Add a legend for mandatory fields
-        worksheet.write(len(df) + 2, 0, "* Mandatory fields", header_format)
-        
-        # Add instructions
-        instructions = [
-            "Instructions for using this template:",
-            "1. Fill in all mandatory fields (marked with *)",
-            "2. ASIN is the Amazon Standard Identification Number",
-            "3. SKU is your internal Stock Keeping Unit code (optional)",
-            "4. Include as many optional fields as possible for better analysis",
-            "5. Save as CSV or Excel file for import into the Product Review Analysis Tool"
-        ]
-        
-        for i, instruction in enumerate(instructions):
-            worksheet.write(len(df) + 4 + i, 0, instruction)
-        
-        # Set column widths
-        for i, col in enumerate(df.columns):
-            column_width = max(df[col].astype(str).map(len).max(), len(col)) + 2
-            worksheet.set_column(i, i, column_width)
-        
+    
+    if XLSX_AVAILABLE:
+        # Full formatting with xlsxwriter if available
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            df.to_excel(writer, sheet_name='Import Template', index=False)
+            
+            # Format the Excel sheet
+            workbook = writer.book
+            worksheet = writer.sheets['Import Template']
+            
+            # Format for headers
+            header_format = workbook.add_format({
+                'bold': True,
+                'text_wrap': True,
+                'valign': 'top',
+                'fg_color': '#D7E4BC',
+                'border': 1
+            })
+            
+            # Apply header format
+            for col_num, value in enumerate(df.columns.values):
+                worksheet.write(0, col_num, value, header_format)
+            
+            # Make mandatory columns stand out
+            required_format = workbook.add_format({
+                'fg_color': '#FFEB9C',
+                'border': 1
+            })
+            
+            # Format required columns
+            required_cols = ['ASIN*', 'Last 30 Days Sales*', 'Last 30 Days Returns*']
+            for col in required_cols:
+                col_idx = df.columns.get_loc(col)
+                worksheet.set_column(col_idx, col_idx, None, required_format)
+            
+            # Add a legend for mandatory fields
+            worksheet.write(len(df) + 2, 0, "* Mandatory fields", header_format)
+            
+            # Add instructions
+            instructions = [
+                "Instructions for using this template:",
+                "1. Fill in all mandatory fields (marked with *)",
+                "2. ASIN is the Amazon Standard Identification Number",
+                "3. SKU is your internal Stock Keeping Unit code (optional)",
+                "4. Include as many optional fields as possible for better analysis",
+                "5. Save as CSV or Excel file for import into the Product Review Analysis Tool"
+            ]
+            
+            for i, instruction in enumerate(instructions):
+                worksheet.write(len(df) + 4 + i, 0, instruction)
+            
+            # Set column widths
+            for i, col in enumerate(df.columns):
+                column_width = max(df[col].astype(str).map(len).max(), len(col)) + 2
+                worksheet.set_column(i, i, column_width)
+    else:
+        # Simple Excel output without formatting if xlsxwriter is not available
+        df.to_excel(output, sheet_name='Import Template', index=False)
+    
+    output.seek(0)
     return output.getvalue()
-
-# The template can be used in the main application for download
