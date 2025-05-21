@@ -33,9 +33,6 @@ def test_openai_api():
             logger.error(f"OpenAI API test failed: {response.status_code} - {response.text}")
             return False
             
-    except Exception as e:
-        logger.error(f"Error testing OpenAI API: {str(e)}")
-        return Falseimport streamlit as st
 import pandas as pd
 import numpy as np
 import io
