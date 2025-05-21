@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 # Try importing OpenAI - for AI analysis
 try:
     import openai
+    from openai import OpenAI  # Import OpenAI client for newer SDK
     HAS_OPENAI = True
 except ImportError:
     logger.warning("OpenAI module not available")
@@ -64,6 +65,41 @@ FDA_DEVICE_CLASSES = {
     ]
 }
 
+def get_openai_client(api_key=None):
+    """
+    Get the OpenAI client based on available SDK version
+    
+    Parameters:
+    - api_key: OpenAI API key (optional if set in environment or streamlit secrets)
+    
+    Returns:
+    - Client object or None, and a boolean indicating if it's the newer SDK
+    """
+    # Check for API key from different sources
+    if not api_key:
+        # Try to get from environment
+        api_key = os.environ.get("OPENAI_API_KEY")
+        
+        # Try to get from streamlit secrets if available and api_key is still None
+        try:
+            import streamlit as st
+            if api_key is None and hasattr(st, 'secrets') and "OPENAI_API_KEY" in st.secrets:
+                api_key = st.secrets["OPENAI_API_KEY"]
+        except (ImportError, AttributeError):
+            pass
+    
+    if not api_key:
+        logger.warning("OpenAI API key not found")
+        return None, False
+    
+    # Check which version of the OpenAI SDK is being used
+    if hasattr(openai, 'OpenAI'):  # New SDK (v1.0.0+)
+        client = OpenAI(api_key=api_key)
+        return client, True
+    else:  # Legacy SDK (<v1.0.0)
+        openai.api_key = api_key
+        return openai, False
+
 def analyze_reviews_with_ai(reviews, api_key=None):
     """
     Analyze a list of product reviews using AI
@@ -78,12 +114,8 @@ def analyze_reviews_with_ai(reviews, api_key=None):
     if not HAS_OPENAI:
         return {"error": "OpenAI module not available"}
     
-    # Set API key if provided
-    if api_key:
-        openai.api_key = api_key
-    
-    # Check if we have an API key
-    if not openai.api_key and not os.environ.get("OPENAI_API_KEY"):
+    client, is_new_sdk = get_openai_client(api_key)
+    if client is None:
         return {"error": "OpenAI API key not set"}
     
     try:
@@ -97,7 +129,8 @@ def analyze_reviews_with_ai(reviews, api_key=None):
         review_content = "\n\n".join(review_texts)
         
         # Create the prompt for the AI
-        prompt = f"""Analyze the following medical device product reviews. 
+        system_prompt = "You are an expert in medical device quality analysis with deep knowledge of FDA regulations, customer feedback interpretation, and product quality improvement."
+        user_prompt = f"""Analyze the following medical device product reviews. 
         Identify key issues, patterns, and insights related to:
         1. Safety concerns
         2. Efficacy/effectiveness
@@ -114,19 +147,28 @@ def analyze_reviews_with_ai(reviews, api_key=None):
         {review_content}
         """
         
-        # Call the OpenAI API
-        response = openai.ChatCompletion.create(
-            model="gpt-4-turbo",
-            messages=[
-                {"role": "system", "content": "You are an expert in medical device quality analysis with deep knowledge of FDA regulations, customer feedback interpretation, and product quality improvement."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=1000,
-            temperature=0.1
-        )
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
         
-        # Process the response
-        analysis = response.choices[0].message.content
+        # Call the OpenAI API based on SDK version
+        if is_new_sdk:
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=messages,
+                max_tokens=1000,
+                temperature=0.1
+            )
+            analysis = response.choices[0].message.content
+        else:
+            response = client.ChatCompletion.create(
+                model="gpt-4o",
+                messages=messages,
+                max_tokens=1000,
+                temperature=0.1
+            )
+            analysis = response.choices[0].message.content
         
         # Extract themes and issues from the analysis
         safety_issues = extract_theme_from_analysis(analysis, "Safety concerns")
@@ -187,12 +229,8 @@ def analyze_returns_with_ai(return_reasons, api_key=None):
     if not HAS_OPENAI:
         return {"error": "OpenAI module not available"}
     
-    # Set API key if provided
-    if api_key:
-        openai.api_key = api_key
-    
-    # Check if we have an API key
-    if not openai.api_key and not os.environ.get("OPENAI_API_KEY"):
+    client, is_new_sdk = get_openai_client(api_key)
+    if client is None:
         return {"error": "OpenAI API key not set"}
     
     try:
@@ -200,7 +238,8 @@ def analyze_returns_with_ai(return_reasons, api_key=None):
         return_text = "\n".join([f"- {reason}" for reason in return_reasons[:30]])  # Limit to 30 returns
         
         # Create the prompt for the AI
-        prompt = f"""Analyze the following return reasons for a medical device product.
+        system_prompt = "You are an expert in medical device quality analysis with deep knowledge of product returns, root cause analysis, and quality improvement."
+        user_prompt = f"""Analyze the following return reasons for a medical device product.
         Categorize the returns into these groups:
         1. Product defects/quality issues
         2. Size/fit issues
@@ -217,19 +256,28 @@ def analyze_returns_with_ai(return_reasons, api_key=None):
         {return_text}
         """
         
-        # Call the OpenAI API
-        response = openai.ChatCompletion.create(
-            model="gpt-4-turbo",
-            messages=[
-                {"role": "system", "content": "You are an expert in medical device quality analysis with deep knowledge of product returns, root cause analysis, and quality improvement."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=800,
-            temperature=0.1
-        )
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
         
-        # Process the response
-        analysis = response.choices[0].message.content
+        # Call the OpenAI API based on SDK version
+        if is_new_sdk:
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=messages,
+                max_tokens=800,
+                temperature=0.1
+            )
+            analysis = response.choices[0].message.content
+        else:
+            response = client.ChatCompletion.create(
+                model="gpt-4o",
+                messages=messages,
+                max_tokens=800,
+                temperature=0.1
+            )
+            analysis = response.choices[0].message.content
         
         # Extract categories from the analysis
         defect_issues = extract_theme_from_analysis(analysis, "Product defects/quality issues")
@@ -273,17 +321,14 @@ def classify_medical_device_with_ai(product_name, category, description="", api_
     if not HAS_OPENAI:
         return {"error": "OpenAI module not available"}
     
-    # Set API key if provided
-    if api_key:
-        openai.api_key = api_key
-    
-    # Check if we have an API key
-    if not openai.api_key and not os.environ.get("OPENAI_API_KEY"):
+    client, is_new_sdk = get_openai_client(api_key)
+    if client is None:
         return {"error": "OpenAI API key not set"}
     
     try:
         # Create the prompt for the AI
-        prompt = f"""Classify the following medical device according to FDA risk classes (I, II, or III).
+        system_prompt = "You are an expert regulatory affairs specialist with deep knowledge of FDA medical device classifications, regulatory pathways, and compliance requirements."
+        user_prompt = f"""Classify the following medical device according to FDA risk classes (I, II, or III).
         
         Product Name: {product_name}
         Category: {category}
@@ -305,19 +350,28 @@ def classify_medical_device_with_ai(product_name, category, description="", api_
         Provide your final classification with confidence level and key regulatory considerations.
         """
         
-        # Call the OpenAI API
-        response = openai.ChatCompletion.create(
-            model="gpt-4-turbo",
-            messages=[
-                {"role": "system", "content": "You are an expert regulatory affairs specialist with deep knowledge of FDA medical device classifications, regulatory pathways, and compliance requirements."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=800,
-            temperature=0.1
-        )
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
         
-        # Process the response
-        analysis = response.choices[0].message.content
+        # Call the OpenAI API based on SDK version
+        if is_new_sdk:
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=messages,
+                max_tokens=800,
+                temperature=0.1
+            )
+            analysis = response.choices[0].message.content
+        else:
+            response = client.ChatCompletion.create(
+                model="gpt-4o",
+                messages=messages,
+                max_tokens=800,
+                temperature=0.1
+            )
+            analysis = response.choices[0].message.content
         
         # Try to extract the final classification
         class_match = re.search(r"Class (I|II|III)", analysis)
@@ -362,12 +416,8 @@ def generate_improvement_recommendations(product_info, reviews_data, returns_dat
     if not HAS_OPENAI:
         return {"error": "OpenAI module not available"}
     
-    # Set API key if provided
-    if api_key:
-        openai.api_key = api_key
-    
-    # Check if we have an API key
-    if not openai.api_key and not os.environ.get("OPENAI_API_KEY"):
+    client, is_new_sdk = get_openai_client(api_key)
+    if client is None:
         return {"error": "OpenAI API key not set"}
     
     try:
@@ -397,7 +447,8 @@ def generate_improvement_recommendations(product_info, reviews_data, returns_dat
                 return_rate = (returns / sales) * 100
         
         # Create the prompt for the AI
-        prompt = f"""As a medical device quality expert, analyze the following product data and provide
+        system_prompt = "You are an expert in medical device quality improvement with deep knowledge of FDA regulations, product development, quality systems, and risk management."
+        user_prompt = f"""As a medical device quality expert, analyze the following product data and provide
         actionable improvement recommendations:
         
         Product: {product_info.get('name', 'Unknown')}
@@ -406,9 +457,9 @@ def generate_improvement_recommendations(product_info, reviews_data, returns_dat
         """
         
         if return_rate is not None:
-            prompt += f"Return Rate: {return_rate:.2f}%\n"
+            user_prompt += f"Return Rate: {return_rate:.2f}%\n"
         
-        prompt += f"""
+        user_prompt += f"""
         Customer Reviews:
         {review_content}
         
@@ -430,19 +481,28 @@ def generate_improvement_recommendations(product_info, reviews_data, returns_dat
         - Priority level (Low, Medium, High)
         """
         
-        # Call the OpenAI API
-        response = openai.ChatCompletion.create(
-            model="gpt-4-turbo",
-            messages=[
-                {"role": "system", "content": "You are an expert in medical device quality improvement with deep knowledge of FDA regulations, product development, quality systems, and risk management."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=1200,
-            temperature=0.2
-        )
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
         
-        # Process the response
-        recommendations = response.choices[0].message.content
+        # Call the OpenAI API based on SDK version
+        if is_new_sdk:
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=messages,
+                max_tokens=1200,
+                temperature=0.2
+            )
+            recommendations = response.choices[0].message.content
+        else:
+            response = client.ChatCompletion.create(
+                model="gpt-4o",
+                messages=messages,
+                max_tokens=1200,
+                temperature=0.2
+            )
+            recommendations = response.choices[0].message.content
         
         # Extract sections from the recommendations
         top_recommendations = extract_theme_from_analysis(recommendations, "Top 5 actionable improvement recommendations")
@@ -483,12 +543,8 @@ def generate_regulatory_assessment(product_info, reviews_data, api_key=None):
     if not HAS_OPENAI:
         return {"error": "OpenAI module not available"}
     
-    # Set API key if provided
-    if api_key:
-        openai.api_key = api_key
-    
-    # Check if we have an API key
-    if not openai.api_key and not os.environ.get("OPENAI_API_KEY"):
+    client, is_new_sdk = get_openai_client(api_key)
+    if client is None:
         return {"error": "OpenAI API key not set"}
     
     try:
@@ -502,7 +558,8 @@ def generate_regulatory_assessment(product_info, reviews_data, api_key=None):
         review_content = "\n".join(review_texts)
         
         # Create the prompt for the AI
-        prompt = f"""As a medical device regulatory expert, assess potential regulatory compliance concerns
+        system_prompt = "You are an expert in medical device regulatory compliance with deep knowledge of FDA regulations, QSR requirements, MDR reporting, and labeling/marketing requirements."
+        user_prompt = f"""As a medical device regulatory expert, assess potential regulatory compliance concerns
         for the following product based on customer reviews:
         
         Product: {product_info.get('name', 'Unknown')}
@@ -526,19 +583,28 @@ def generate_regulatory_assessment(product_info, reviews_data, api_key=None):
         - Priority level (Low, Medium, High)
         """
         
-        # Call the OpenAI API
-        response = openai.ChatCompletion.create(
-            model="gpt-4-turbo",
-            messages=[
-                {"role": "system", "content": "You are an expert in medical device regulatory compliance with deep knowledge of FDA regulations, QSR requirements, MDR reporting, and labeling/marketing requirements."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=1000,
-            temperature=0.1
-        )
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
         
-        # Process the response
-        assessment = response.choices[0].message.content
+        # Call the OpenAI API based on SDK version
+        if is_new_sdk:
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=messages,
+                max_tokens=1000,
+                temperature=0.1
+            )
+            assessment = response.choices[0].message.content
+        else:
+            response = client.ChatCompletion.create(
+                model="gpt-4o",
+                messages=messages,
+                max_tokens=1000,
+                temperature=0.1
+            )
+            assessment = response.choices[0].message.content
         
         # Extract risk level
         risk_match = re.search(r"Overall regulatory risk assessment: (Low|Medium|High)", assessment)
@@ -566,7 +632,6 @@ def generate_regulatory_assessment(product_info, reviews_data, api_key=None):
         return {"success": False, "error": str(e)}
 
 # Non-AI backup functions for when AI is not available
-
 def keyword_based_review_analysis(reviews):
     """
     Perform basic keyword-based analysis of reviews when AI is not available
