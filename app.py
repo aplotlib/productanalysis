@@ -146,7 +146,7 @@ def render_file_upload():
     """Render the file upload section."""
     st.header("Import Data")
     
-    upload_tabs = st.tabs(["Structured Data Import", "Document Import", "Historical Data"])
+    upload_tabs = st.tabs(["Structured Data Import", "Manual Entry", "Document Import", "Historical Data"])
     
     # Tab 1: Structured Data Import
     with upload_tabs[0]:
@@ -209,8 +209,174 @@ def render_file_upload():
                 else:
                     st.error("pandas module is not available for processing files.")
     
-    # Tab 2: Document Import
+    # Tab 2: Manual Entry
     with upload_tabs[1]:
+        st.markdown("""
+        Manually enter product details for analysis. This is useful for analyzing a single product
+        without needing to upload a spreadsheet.
+        
+        **Required fields are marked with an asterisk (*)**
+        """)
+        
+        # Create a form for manual data entry
+        with st.form("manual_entry_form"):
+            # Product Details Section
+            st.subheader("Product Details")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                asin = st.text_input("ASIN* (Amazon Standard Identification Number)", help="Required field")
+                sku = st.text_input("SKU (Stock Keeping Unit)", help="Optional")
+            
+            with col2:
+                product_name = st.text_input("Product Name*", help="Required field")
+                category = st.selectbox(
+                    "Category*", 
+                    options=["Mobility Aids", "Bathroom Safety", "Pain Relief", "Sleep & Comfort", 
+                            "Fitness & Recovery", "Daily Living Aids", "Respiratory Care", "Other"],
+                    help="Required field"
+                )
+            
+            # Sales & Returns Section
+            st.subheader("Sales & Returns Data")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                sales_30d = st.number_input("Last 30 Days Sales*", min_value=0, help="Required field")
+                sales_365d = st.number_input("Last 365 Days Sales", min_value=0, help="Optional")
+            
+            with col2:
+                returns_30d = st.number_input("Last 30 Days Returns*", min_value=0, help="Required field")
+                returns_365d = st.number_input("Last 365 Days Returns", min_value=0, help="Optional")
+            
+            # Ratings & Reviews Section
+            st.subheader("Ratings & Reviews")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                star_rating = st.slider("Star Rating", min_value=1.0, max_value=5.0, value=4.0, step=0.1, help="Optional")
+            
+            with col2:
+                total_reviews = st.number_input("Total Reviews", min_value=0, help="Optional")
+            
+            # Manual Reviews & Return Reasons (optional)
+            st.subheader("Manual Reviews & Return Reasons (Optional)")
+            
+            # Reviews input
+            st.text_area(
+                "Reviews (One per line, format: Rating - Review Text, e.g., '4 - Good product but could be better')",
+                height=150,
+                key="manual_reviews",
+                help="Optional: Enter reviews one per line with rating and text separated by a dash"
+            )
+            
+            # Return reasons input
+            st.text_area(
+                "Return Reasons (One per line)",
+                height=150,
+                key="manual_returns",
+                help="Optional: Enter return reasons one per line"
+            )
+            
+            # Submit button
+            submitted = st.form_submit_button("Save Product Data")
+        
+        # Process manual entry when form is submitted
+        if submitted:
+            # Validate required fields
+            if not asin or not product_name or not category or sales_30d == 0:
+                st.error("Please fill in all required fields marked with an asterisk (*)")
+            else:
+                try:
+                    # Create a DataFrame with the manually entered data
+                    manual_data = {
+                        "ASIN": [asin],
+                        "SKU": [sku],
+                        "Product Name": [product_name],
+                        "Category": [category],
+                        "Last 30 Days Sales": [sales_30d],
+                        "Last 30 Days Returns": [returns_30d],
+                        "Last 365 Days Sales": [sales_365d],
+                        "Last 365 Days Returns": [returns_365d],
+                        "Star Rating": [star_rating],
+                        "Total Reviews": [total_reviews]
+                    }
+                    
+                    if AVAILABLE_MODULES['pandas']:
+                        df = pd.DataFrame(manual_data)
+                        
+                        # Store in session state
+                        if 'structured_data' in st.session_state.uploaded_files:
+                            # Append to existing data if it exists
+                            existing_df = st.session_state.uploaded_files['structured_data']
+                            # Check if this ASIN already exists
+                            if asin in existing_df['ASIN'].values:
+                                # Update the existing row
+                                existing_df = existing_df[existing_df['ASIN'] != asin]
+                                updated_df = pd.concat([existing_df, df], ignore_index=True)
+                                st.session_state.uploaded_files['structured_data'] = updated_df
+                                st.success(f"Updated product {asin} in the dataset")
+                            else:
+                                # Append the new row
+                                updated_df = pd.concat([existing_df, df], ignore_index=True)
+                                st.session_state.uploaded_files['structured_data'] = updated_df
+                                st.success(f"Added product {asin} to the dataset")
+                        else:
+                            # Create new dataset
+                            st.session_state.uploaded_files['structured_data'] = df
+                            st.success(f"Created new dataset with product {asin}")
+                        
+                        # Process manual reviews if provided
+                        manual_reviews = st.session_state.get("manual_reviews", "")
+                        if manual_reviews:
+                            reviews_data = []
+                            for line in manual_reviews.strip().split('\n'):
+                                if ' - ' in line:
+                                    try:
+                                        rating_str, text = line.split(' - ', 1)
+                                        rating = int(rating_str.strip())
+                                        if 1 <= rating <= 5:
+                                            reviews_data.append({
+                                                "rating": rating,
+                                                "review_text": text.strip(),
+                                                "asin": asin
+                                            })
+                                    except:
+                                        pass  # Skip invalid lines
+                            
+                            if reviews_data:
+                                # Store reviews data
+                                if 'manual_reviews' not in st.session_state.uploaded_files:
+                                    st.session_state.uploaded_files['manual_reviews'] = {}
+                                
+                                st.session_state.uploaded_files['manual_reviews'][asin] = reviews_data
+                                st.success(f"Saved {len(reviews_data)} reviews for {asin}")
+                        
+                        # Process manual return reasons if provided
+                        manual_returns = st.session_state.get("manual_returns", "")
+                        if manual_returns:
+                            return_reasons = [reason.strip() for reason in manual_returns.strip().split('\n') if reason.strip()]
+                            
+                            if return_reasons:
+                                # Store return reasons
+                                if 'manual_returns' not in st.session_state.uploaded_files:
+                                    st.session_state.uploaded_files['manual_returns'] = {}
+                                
+                                st.session_state.uploaded_files['manual_returns'][asin] = [
+                                    {"return_reason": reason, "asin": asin} for reason in return_reasons
+                                ]
+                                st.success(f"Saved {len(return_reasons)} return reasons for {asin}")
+                        
+                        # Display the entered data
+                        st.subheader("Entered Product Data")
+                        st.dataframe(df)
+                    else:
+                        st.error("pandas module is not available. Cannot process manual entry.")
+                except Exception as e:
+                    st.error(f"Error processing manual entry: {str(e)}")
+    
+    # Tab 3: Document Import
+    with upload_tabs[2]:
         st.markdown("""
         Upload PDFs, images of reviews, return reports, or screenshots. 
         The system will use OCR to extract data when possible.
@@ -259,8 +425,8 @@ def render_file_upload():
         elif doc_files and not (HAS_LOCAL_MODULES and AVAILABLE_MODULES['ocr']):
             st.error("OCR processing is not available. Document processing is skipped.")
     
-    # Tab 3: Historical Data
-    with upload_tabs[2]:
+    # Tab 4: Historical Data
+    with upload_tabs[3]:
         st.markdown("""
         Upload historical data for trend analysis (optional).
         Use the same format as the structured data import.
@@ -300,7 +466,7 @@ def render_product_selection():
     
     # Check if we have structured data
     if 'structured_data' not in st.session_state.uploaded_files:
-        st.warning("Please upload structured product data first.")
+        st.warning("Please upload structured product data first or use Manual Entry.")
         return
     
     if not AVAILABLE_MODULES['pandas']:
@@ -363,6 +529,8 @@ def render_product_selection():
     
     # Get review data for the selected product from documents if available
     reviews_data = []
+    
+    # 1. Check for OCR-extracted reviews from documents
     if 'documents' in st.session_state.uploaded_files and HAS_LOCAL_MODULES and AVAILABLE_MODULES['ocr']:
         docs = st.session_state.uploaded_files['documents']
         
@@ -372,8 +540,27 @@ def render_product_selection():
             extracted_reviews = ocr_processor.extract_amazon_reviews_data(text)
             if "reviews" in extracted_reviews:
                 reviews_data.extend(extracted_reviews["reviews"])
-        
-        st.write(f"Found {len(reviews_data)} reviews in uploaded documents.")
+    
+    # 2. Check for manually entered reviews
+    if 'manual_reviews' in st.session_state.uploaded_files:
+        manual_reviews = st.session_state.uploaded_files['manual_reviews']
+        if product_info['asin'] in manual_reviews:
+            reviews_data.extend(manual_reviews[product_info['asin']])
+    
+    if reviews_data:
+        st.write(f"Found {len(reviews_data)} reviews for this product.")
+    
+    # Get return reasons data
+    return_reasons_data = []
+    
+    # Check for manually entered return reasons
+    if 'manual_returns' in st.session_state.uploaded_files:
+        manual_returns = st.session_state.uploaded_files['manual_returns']
+        if product_info['asin'] in manual_returns:
+            return_reasons_data.extend(manual_returns[product_info['asin']])
+    
+    if return_reasons_data:
+        st.write(f"Found {len(return_reasons_data)} return reasons for this product.")
     
     # Get historical data for the selected product if available
     historical_data = None
@@ -412,7 +599,8 @@ def render_product_selection():
                             'product_info': product_info,
                             'analysis': analysis_result,
                             'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            'reviews_data': reviews_data if 'reviews_data' in locals() else [],
+                            'reviews_data': reviews_data if reviews_data else [],
+                            'return_reasons_data': return_reasons_data if return_reasons_data else [],
                             'historical_data': historical_data
                         }
                     else:
@@ -489,6 +677,20 @@ def render_analysis_results():
                         topics = sorted(review_analysis['common_topics'].items(), key=lambda x: x[1], reverse=True)
                         for topic, count in topics[:10]:  # Top 10 topics
                             st.write(f"{topic}: {count} mentions")
+                    
+                    # Display return reasons if available
+                    if 'return_reasons_data' in result and result['return_reasons_data']:
+                        st.subheader("Return Reasons")
+                        return_reasons = [item.get('return_reason', '') for item in result['return_reasons_data']]
+                        unique_reasons = {}
+                        for reason in return_reasons:
+                            if reason in unique_reasons:
+                                unique_reasons[reason] += 1
+                            else:
+                                unique_reasons[reason] = 1
+                        
+                        for reason, count in sorted(unique_reasons.items(), key=lambda x: x[1], reverse=True):
+                            st.write(f"{reason}: {count}")
                 else:
                     st.write("No detailed analysis available for this product.")
             
@@ -515,6 +717,24 @@ def render_analysis_results():
                     topics_chart = data_analysis.create_topics_chart(review_analysis)
                     if topics_chart:
                         st.plotly_chart(topics_chart, use_container_width=True)
+                    
+                    # Return reasons chart if available
+                    if 'return_reasons_data' in result and result['return_reasons_data'] and len(result['return_reasons_data']) > 0:
+                        return_reasons = [item.get('return_reason', '') for item in result['return_reasons_data']]
+                        reason_counts = {}
+                        for reason in return_reasons:
+                            if reason in reason_counts:
+                                reason_counts[reason] += 1
+                            else:
+                                reason_counts[reason] = 1
+                        
+                        fig = px.pie(
+                            values=list(reason_counts.values()),
+                            names=list(reason_counts.keys()),
+                            title="Return Reasons",
+                            hole=0.4
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
                 else:
                     if not AVAILABLE_MODULES['plotly']:
                         st.warning("Plotly is not available. Visualizations cannot be displayed.")
@@ -580,12 +800,18 @@ def render_help_section():
     with help_tabs[0]:
         st.subheader("Getting Started")
         st.markdown("""
-        1. **Import Data**: Start by uploading your product data file in CSV or Excel format.
-        2. **Upload Documents**: If you have PDF reports or screenshots, upload them for OCR processing.
-        3. **Select Product**: Choose the product you want to analyze.
-        4. **Run Analysis**: Click the "Analyze Product" button to process the data.
-        5. **Review Results**: Explore the analysis, recommendations, and visualizations.
-        6. **Export Reports**: Download the analysis in your preferred format.
+        1. **Import Data**: Choose one of these methods:
+           - Upload a CSV or Excel file with product data
+           - Manually enter product details in the "Manual Entry" tab
+           - Upload PDF reports or screenshots for OCR processing
+        
+        2. **Select Product**: Choose the product you want to analyze.
+        
+        3. **Run Analysis**: Click the "Analyze Product" button to process the data.
+        
+        4. **Review Results**: Explore the analysis, recommendations, and visualizations.
+        
+        5. **Export Reports**: Download the analysis in your preferred format.
         """)
         
         st.subheader("Required Data Format")
@@ -611,6 +837,15 @@ def render_help_section():
     
     with help_tabs[1]:
         st.subheader("Frequently Asked Questions")
+        
+        with st.expander("How do I enter data manually?"):
+            st.markdown("""
+            1. Go to the "Import" tab and select the "Manual Entry" sub-tab
+            2. Fill in the required fields marked with an asterisk (*)
+            3. Optionally, add reviews and return reasons in the text areas
+            4. Click "Save Product Data" to add the product to your dataset
+            5. You can then analyze this product just like imported data
+            """)
         
         with st.expander("What types of files can I upload?"):
             st.markdown("""
@@ -699,12 +934,30 @@ def render_help_section():
             | 114-6826075-5417831 | Bars seem defective | 05/13/2025 |
             """)
         
-        st.markdown("### Example 3: Customer Review")
+        st.markdown("### Example 3: Manual Review Entry")
         
         st.markdown("""
-        > "Vive 3-wheel Walker with seat was put together my mom went to go use it and it folded in she almost fell. She's a 125 lb the seating is not comfortable for her. I want a full refund if she's barely seating in the seat I know a 300 lb person cannot fit."
-        >
-        > Star Rating: ★★☆☆☆
+        When entering reviews manually, use the format `Rating - Review Text` with one review per line:
+        
+        ```
+        5 - Love this walker! Very stable and easy to fold.
+        3 - Decent product but assembly instructions could be clearer.
+        2 - Seat is too small for me, not comfortable for longer sitting periods.
+        4 - Good quality but heavier than expected.
+        ```
+        """)
+        
+        st.markdown("### Example 4: Manual Return Reasons Entry")
+        
+        st.markdown("""
+        When entering return reasons manually, put one reason per line:
+        
+        ```
+        Item too small for customer
+        Defective wheel locking mechanism
+        Customer ordered wrong color
+        Assembly difficulty
+        ```
         """)
     
     with help_tabs[3]:
