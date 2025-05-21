@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 # Constants
 SUPPORT_EMAIL = "alexander.popoff@vivehealth.com"
+API_KEY_NAME = "OPENAI_API_KEY"  # For storing in streamlit secrets
 
 # Track available modules
 AVAILABLE_MODULES = {
@@ -27,7 +28,8 @@ AVAILABLE_MODULES = {
     'pillow': False,
     'requests': False,
     'ocr': False,
-    'xlsx_writer': False
+    'xlsx_writer': False,
+    'ai_api': False      # New module for AI API functionality
 }
 
 # Try importing pandas
@@ -81,11 +83,25 @@ try:
 except ImportError:
     logger.warning("OCR modules not available")
 
+# Try importing OpenAI - for AI analysis
+try:
+    import openai
+    # Check if we can actually use the API
+    api_key = os.environ.get(API_KEY_NAME) or st.secrets.get(API_KEY_NAME, None)
+    if api_key:
+        openai.api_key = api_key
+        AVAILABLE_MODULES['ai_api'] = True
+    else:
+        logger.warning("OpenAI API key not found in environment or secrets")
+except ImportError:
+    logger.warning("OpenAI module not available")
+
 # Try importing local modules - use safe imports
 try:
     import ocr_processor
     import data_analysis
     import import_template
+    import ai_analysis  # New module for AI-specific analysis functions
     HAS_LOCAL_MODULES = True
     logger.info("Successfully imported local modules")
 except ImportError as e:
@@ -102,18 +118,208 @@ if 'uploaded_files' not in st.session_state:
 if 'current_product' not in st.session_state:
     st.session_state.current_product = None
 
+if 'ai_insights' not in st.session_state:
+    st.session_state.ai_insights = {}
+
+# Medical device classification constants
+FDA_DEVICE_CLASSES = {
+    'Class I': 'Low risk, subject to general controls',
+    'Class II': 'Moderate risk, subject to special controls', 
+    'Class III': 'High risk, subject to premarket approval'
+}
+
+# Common medical device categories for Amazon
+MED_DEVICE_CATEGORIES = [
+    "Mobility Aids", 
+    "Bathroom Safety", 
+    "Pain Relief", 
+    "Sleep & Comfort", 
+    "Fitness & Recovery", 
+    "Daily Living Aids", 
+    "Respiratory Care",
+    "Blood Pressure Monitors",
+    "Diabetes Care",
+    "Orthopedic Support",
+    "First Aid",
+    "Wound Care",
+    "Other"
+]
+
 # Setup the Streamlit page
 st.set_page_config(
-    page_title="Product Review Analysis Tool",
-    page_icon="📊",
+    page_title="Medical Device Review Analysis Tool",
+    page_icon="🩺",
     layout="wide"
 )
+
+# Add AI analysis functions if the OpenAI module is available
+if AVAILABLE_MODULES['ai_api']:
+    def analyze_with_ai(text, analysis_type='sentiment'):
+        """
+        Analyze text using OpenAI API
+        
+        Parameters:
+        - text: The text to analyze
+        - analysis_type: Type of analysis to perform
+        
+        Returns:
+        - Dictionary with analysis results
+        """
+        try:
+            prompt = ""
+            if analysis_type == 'sentiment':
+                prompt = f"""Analyze the sentiment of this product review for a medical device. 
+                Consider medical-specific language and concerns. Extract concerns about safety, 
+                efficacy, comfort, ease of use, and durability. Classify the overall sentiment 
+                as positive, negative, or neutral.
+                
+                Review: {text}
+                """
+            elif analysis_type == 'medical_concerns':
+                prompt = f"""Identify any medical concerns or adverse events mentioned in this review 
+                for a medical device. Flag any mentions of: pain, discomfort, injury, malfunction, 
+                inaccuracy, allergic reactions, or other health-related issues. Also extract any 
+                mentions of specific medical conditions or treatments.
+                
+                Review: {text}
+                """
+            elif analysis_type == 'compliance_issues':
+                prompt = f"""Analyze this medical device product review for potential regulatory 
+                compliance issues. Flag if the review mentions: product claims beyond labeled use, 
+                product defects, safety issues, manufacturing quality concerns, or potential 
+                reportable events. Categorize the compliance risk as: none, low, medium, or high.
+                
+                Review: {text}
+                """
+            elif analysis_type == 'return_analysis':
+                prompt = f"""Analyze this medical device return reason to identify root causes. 
+                Determine if the return is due to: defect, user error, unmet expectations, 
+                competitive comparison, medical efficacy, comfort, or sizing issues.
+                
+                Return reason: {text}
+                """
+            
+            response = openai.ChatCompletion.create(
+                model="gpt-4-turbo",
+                messages=[
+                    {"role": "system", "content": "You are an expert in medical device quality analysis, FDA regulations, and customer feedback interpretation."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=500,
+                temperature=0.1
+            )
+            
+            result = response.choices[0].message.content
+            return {"success": True, "result": result}
+        except Exception as e:
+            logger.error(f"AI analysis error: {str(e)}")
+            return {"success": False, "error": str(e)}
+    
+    def classify_medical_device(product_name, category, description=""):
+        """
+        Use AI to classify a medical device according to FDA risk classes
+        
+        Parameters:
+        - product_name: Name of the product
+        - category: Product category
+        - description: Product description if available
+        
+        Returns:
+        - Dictionary with classification and reasoning
+        """
+        try:
+            prompt = f"""Classify the following medical device according to FDA risk classes (I, II, or III).
+            Consider the device type, intended use, and risk profile.
+            
+            Product name: {product_name}
+            Category: {category}
+            Description: {description}
+            
+            Provide the following:
+            1. Likely FDA class (I, II, or III)
+            2. Brief reasoning for the classification
+            3. Potential regulatory considerations
+            4. Whether the device likely requires prescription or is OTC
+            """
+            
+            response = openai.ChatCompletion.create(
+                model="gpt-4-turbo",
+                messages=[
+                    {"role": "system", "content": "You are an expert in medical device regulatory classification, FDA regulations, and compliance requirements."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=500,
+                temperature=0.1
+            )
+            
+            result = response.choices[0].message.content
+            return {"success": True, "result": result}
+        except Exception as e:
+            logger.error(f"Device classification error: {str(e)}")
+            return {"success": False, "error": str(e)}
+    
+    def generate_improvement_recommendations(product_info, reviews_data, returns_data):
+        """
+        Generate AI-powered recommendations for product improvements
+        
+        Parameters:
+        - product_info: Dictionary with product details
+        - reviews_data: List of product reviews
+        - returns_data: List of return reasons
+        
+        Returns:
+        - Dictionary with recommendations
+        """
+        try:
+            # Prepare the data for analysis
+            reviews_text = "\n".join([f"Rating: {r.get('rating', 'N/A')} - {r.get('review_text', '')}" 
+                                      for r in reviews_data[:20]])  # Limit to 20 reviews to avoid token limits
+            
+            returns_text = "\n".join([f"Return reason: {r.get('return_reason', '')}" 
+                                     for r in returns_data[:20]])  # Limit to 20 return reasons
+            
+            prompt = f"""As a medical device quality expert, analyze the following product data and provide
+            improvement recommendations:
+            
+            Product: {product_info.get('name', 'Unknown')}
+            Category: {product_info.get('category', 'Medical Device')}
+            30-Day Return Rate: {product_info.get('return_rate_30d', 'N/A')}%
+            Star Rating: {product_info.get('star_rating', 'N/A')}
+            
+            Customer Reviews:
+            {reviews_text}
+            
+            Return Reasons:
+            {returns_text}
+            
+            Based on this data, provide:
+            1. Top 3-5 actionable improvement recommendations
+            2. Potential quality issues requiring investigation
+            3. Risk assessment from a regulatory perspective
+            4. Competitive differentiation opportunities
+            """
+            
+            response = openai.ChatCompletion.create(
+                model="gpt-4-turbo",
+                messages=[
+                    {"role": "system", "content": "You are an expert in medical device quality improvement, FDA regulations, and customer experience optimization."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=1000,
+                temperature=0.2
+            )
+            
+            result = response.choices[0].message.content
+            return {"success": True, "result": result}
+        except Exception as e:
+            logger.error(f"Recommendation generation error: {str(e)}")
+            return {"success": False, "error": str(e)}
 
 def main():
     """Main application entry point."""
     # Render header
-    st.title("Product Review Analysis Tool")
-    st.subheader("Analyze product reviews, ratings, and returns for Vive Health medical devices")
+    st.title("Medical Device Review Analysis Tool")
+    st.subheader("Analyze product reviews, ratings, and returns for medical devices on Amazon")
     
     # Display available modules in sidebar
     with st.sidebar:
@@ -126,9 +332,31 @@ def main():
                 st.success(f"✅ {module}")
             else:
                 st.error(f"❌ {module}")
+        
+        # AI API Configuration (if not available)
+        if not AVAILABLE_MODULES['ai_api']:
+            st.warning("AI analysis requires an OpenAI API key")
+            api_key = st.text_input("Enter OpenAI API Key", type="password")
+            if api_key and st.button("Save API Key"):
+                # In a production app, this should be stored securely
+                os.environ[API_KEY_NAME] = api_key
+                try:
+                    import openai
+                    openai.api_key = api_key
+                    # Test the key
+                    openai.Completion.create(
+                        model="davinci",
+                        prompt="Test",
+                        max_tokens=5
+                    )
+                    AVAILABLE_MODULES['ai_api'] = True
+                    st.success("API key verified and saved!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Failed to verify API key: {str(e)}")
     
     # Main content tabs
-    tabs = st.tabs(["Import", "Analyze", "Results", "Help"])
+    tabs = st.tabs(["Import", "Analyze", "Results", "AI Insights", "Help"])
     
     with tabs[0]:
         render_file_upload()
@@ -140,6 +368,9 @@ def main():
         render_analysis_results()
     
     with tabs[3]:
+        render_ai_insights()
+    
+    with tabs[4]:
         render_help_section()
 
 def render_file_upload():
@@ -168,7 +399,7 @@ def render_file_upload():
             st.download_button(
                 label="Download Sample Template",
                 data=sample_template,
-                file_name="product_analysis_template.xlsx",
+                file_name="medical_device_analysis_template.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         
@@ -232,9 +463,31 @@ def render_file_upload():
                 product_name = st.text_input("Product Name*", help="Required field")
                 category = st.selectbox(
                     "Category*", 
-                    options=["Mobility Aids", "Bathroom Safety", "Pain Relief", "Sleep & Comfort", 
-                            "Fitness & Recovery", "Daily Living Aids", "Respiratory Care", "Other"],
+                    options=MED_DEVICE_CATEGORIES,
                     help="Required field"
+                )
+            
+            # Additional Medical Device Info
+            st.subheader("Medical Device Information")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                device_class = st.selectbox(
+                    "FDA Device Class (if known)",
+                    options=["Unknown", "Class I", "Class II", "Class III"],
+                    help="FDA classification for regulatory requirements"
+                )
+                prescription = st.selectbox(
+                    "Prescription Status",
+                    options=["OTC (Over-the-counter)", "Rx (Prescription)", "Unknown"],
+                    help="Whether the device requires a prescription"
+                )
+            
+            with col2:
+                product_description = st.text_area(
+                    "Product Description",
+                    help="Brief description of the product for better AI analysis",
+                    height=100
                 )
             
             # Sales & Returns Section
@@ -294,6 +547,9 @@ def render_file_upload():
                         "SKU": [sku],
                         "Product Name": [product_name],
                         "Category": [category],
+                        "FDA Device Class": [device_class],
+                        "Prescription Status": [prescription],
+                        "Product Description": [product_description],
                         "Last 30 Days Sales": [sales_30d],
                         "Last 30 Days Returns": [returns_30d],
                         "Last 365 Days Sales": [sales_365d],
@@ -498,6 +754,9 @@ def render_product_selection():
         'sku': product_row['SKU'] if 'SKU' in product_row else "N/A",
         'name': product_row['Product Name'] if 'Product Name' in product_row else f"Product {product_row['ASIN']}",
         'category': product_row['Category'] if 'Category' in product_row else "Medical Device",
+        'device_class': product_row['FDA Device Class'] if 'FDA Device Class' in product_row else "Unknown",
+        'prescription': product_row['Prescription Status'] if 'Prescription Status' in product_row else "Unknown",
+        'description': product_row['Product Description'] if 'Product Description' in product_row else "",
         'star_rating': product_row['Star Rating'] if 'Star Rating' in product_row else None,
         'total_reviews': product_row['Total Reviews'] if 'Total Reviews' in product_row else None,
         'sales_30d': product_row['Last 30 Days Sales'],
@@ -526,6 +785,10 @@ def render_product_selection():
     with col4:
         if product_info['star_rating'] is not None:
             st.metric("Star Rating", f"{product_info['star_rating']:.1f} ★")
+    
+    # Display FDA device class if available
+    if product_info['device_class'] != "Unknown":
+        st.info(f"FDA Classification: {product_info['device_class']} - {FDA_DEVICE_CLASSES.get(product_info['device_class'], '')}")
     
     # Get review data for the selected product from documents if available
     reviews_data = []
@@ -573,55 +836,173 @@ def render_product_selection():
                 historical_data = hist_filtered
                 st.write(f"Found {len(historical_data)} historical data points for this product.")
     
+    # AI Device Classification
+    if AVAILABLE_MODULES['ai_api'] and product_info['device_class'] == "Unknown":
+        if st.button("Use AI to Classify Device"):
+            with st.spinner("Classifying medical device..."):
+                classification = classify_medical_device(
+                    product_info['name'],
+                    product_info['category'],
+                    product_info['description']
+                )
+                
+                if classification["success"]:
+                    st.info("AI Device Classification Result:")
+                    st.markdown(classification["result"])
+                else:
+                    st.error(f"Classification failed: {classification['error']}")
+    
     # Run analysis button
-    if st.button("Analyze Product", type="primary"):
-        # Check if we have both product info and review data
-        if st.session_state.current_product:
-            with st.spinner("Analyzing product reviews and returns..."):
-                try:
-                    # Run analysis if we have the proper modules and local dependencies
-                    if HAS_LOCAL_MODULES:
-                        # Run analysis
-                        analysis_result = f"Analysis for {product_info['name']} ({product_info['asin']})\n\n"
-                        analysis_result += f"30-Day Sales: {product_info['sales_30d']}\n"
-                        analysis_result += f"30-Day Returns: {product_info['returns_30d']}\n"
-                        analysis_result += f"30-Day Return Rate: {product_info['return_rate_30d']:.2f}%\n"
+    analysis_col1, analysis_col2 = st.columns(2)
+    
+    with analysis_col1:
+        if st.button("Standard Analysis", type="primary"):
+            # Check if we have both product info and review data
+            if st.session_state.current_product:
+                with st.spinner("Analyzing product reviews and returns..."):
+                    try:
+                        # Run analysis if we have the proper modules and local dependencies
+                        if HAS_LOCAL_MODULES:
+                            # Run analysis
+                            analysis_result = f"Analysis for {product_info['name']} ({product_info['asin']})\n\n"
+                            analysis_result += f"30-Day Sales: {product_info['sales_30d']}\n"
+                            analysis_result += f"30-Day Returns: {product_info['returns_30d']}\n"
+                            analysis_result += f"30-Day Return Rate: {product_info['return_rate_30d']:.2f}%\n"
+                            
+                            if reviews_data:
+                                review_analysis = data_analysis.analyze_reviews(reviews_data)
+                                analysis_result += f"\nReview Analysis:\n"
+                                analysis_result += f"Total Reviews: {review_analysis['total_reviews']}\n"
+                                if review_analysis['average_rating']:
+                                    analysis_result += f"Average Rating: {review_analysis['average_rating']:.1f}\n"
+                            
+                            # Store result in session state
+                            st.session_state.analysis_results[product_info['asin']] = {
+                                'product_info': product_info,
+                                'analysis': analysis_result,
+                                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                'reviews_data': reviews_data if reviews_data else [],
+                                'return_reasons_data': return_reasons_data if return_reasons_data else [],
+                                'historical_data': historical_data
+                            }
+                        else:
+                            # Basic analysis without local modules
+                            analysis_result = f"Basic Analysis for {product_info['name']} ({product_info['asin']})\n\n"
+                            analysis_result += f"30-Day Sales: {product_info['sales_30d']}\n"
+                            analysis_result += f"30-Day Returns: {product_info['returns_30d']}\n"
+                            analysis_result += f"30-Day Return Rate: {product_info['return_rate_30d']:.2f}%\n"
+                            
+                            st.session_state.analysis_results[product_info['asin']] = {
+                                'product_info': product_info,
+                                'analysis': analysis_result,
+                                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                'reviews_data': reviews_data if reviews_data else [],
+                                'return_reasons_data': return_reasons_data if return_reasons_data else [],
+                                'historical_data': historical_data
+                            }
                         
-                        if reviews_data:
-                            review_analysis = data_analysis.analyze_reviews(reviews_data)
-                            analysis_result += f"\nReview Analysis:\n"
-                            analysis_result += f"Total Reviews: {review_analysis['total_reviews']}\n"
-                            if review_analysis['average_rating']:
-                                analysis_result += f"Average Rating: {review_analysis['average_rating']:.1f}\n"
-                        
-                        # Store result in session state
-                        st.session_state.analysis_results[product_info['asin']] = {
-                            'product_info': product_info,
-                            'analysis': analysis_result,
-                            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            'reviews_data': reviews_data if reviews_data else [],
-                            'return_reasons_data': return_reasons_data if return_reasons_data else [],
-                            'historical_data': historical_data
-                        }
-                    else:
-                        # Basic analysis without local modules
-                        analysis_result = f"Basic Analysis for {product_info['name']} ({product_info['asin']})\n\n"
-                        analysis_result += f"30-Day Sales: {product_info['sales_30d']}\n"
-                        analysis_result += f"30-Day Returns: {product_info['returns_30d']}\n"
-                        analysis_result += f"30-Day Return Rate: {product_info['return_rate_30d']:.2f}%\n"
-                        
-                        st.session_state.analysis_results[product_info['asin']] = {
-                            'product_info': product_info,
-                            'analysis': analysis_result,
-                            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        }
-                    
-                    st.success("Analysis complete!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error during analysis: {str(e)}")
+                        st.success("Analysis complete!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error during analysis: {str(e)}")
+            else:
+                st.error("Please select a product to analyze.")
+    
+    with analysis_col2:
+        if AVAILABLE_MODULES['ai_api']:
+            if st.button("AI-Enhanced Analysis", type="secondary"):
+                if st.session_state.current_product:
+                    with st.spinner("Performing AI-enhanced analysis..."):
+                        try:
+                            # First run standard analysis if not already done
+                            if product_info['asin'] not in st.session_state.analysis_results:
+                                analysis_result = f"Analysis for {product_info['name']} ({product_info['asin']})\n\n"
+                                analysis_result += f"30-Day Sales: {product_info['sales_30d']}\n"
+                                analysis_result += f"30-Day Returns: {product_info['returns_30d']}\n"
+                                analysis_result += f"30-Day Return Rate: {product_info['return_rate_30d']:.2f}%\n"
+                                
+                                if reviews_data:
+                                    review_analysis = data_analysis.analyze_reviews(reviews_data) if HAS_LOCAL_MODULES else {'total_reviews': len(reviews_data), 'average_rating': None}
+                                    analysis_result += f"\nReview Analysis:\n"
+                                    analysis_result += f"Total Reviews: {review_analysis['total_reviews']}\n"
+                                    if review_analysis.get('average_rating'):
+                                        analysis_result += f"Average Rating: {review_analysis['average_rating']:.1f}\n"
+                                
+                                # Store standard analysis
+                                st.session_state.analysis_results[product_info['asin']] = {
+                                    'product_info': product_info,
+                                    'analysis': analysis_result,
+                                    'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                    'reviews_data': reviews_data if reviews_data else [],
+                                    'return_reasons_data': return_reasons_data if return_reasons_data else [],
+                                    'historical_data': historical_data
+                                }
+                            
+                            # Now run AI analysis
+                            ai_insights = {}
+                            
+                            # 1. Analyze individual reviews with AI (up to 10 to avoid excessive API calls)
+                            if reviews_data:
+                                review_insights = []
+                                for review in reviews_data[:10]:  # Limit to 10 reviews
+                                    review_text = review.get('review_text', '')
+                                    if review_text:
+                                        # Analyze sentiment
+                                        sentiment = analyze_with_ai(review_text, 'sentiment')
+                                        # Analyze medical concerns
+                                        medical_concerns = analyze_with_ai(review_text, 'medical_concerns')
+                                        # Analyze compliance issues
+                                        compliance = analyze_with_ai(review_text, 'compliance_issues')
+                                        
+                                        review_insights.append({
+                                            'review': review_text,
+                                            'rating': review.get('rating', 'N/A'),
+                                            'sentiment_analysis': sentiment.get('result', 'Analysis failed') if sentiment.get('success', False) else 'Analysis failed',
+                                            'medical_concerns': medical_concerns.get('result', 'Analysis failed') if medical_concerns.get('success', False) else 'Analysis failed',
+                                            'compliance_issues': compliance.get('result', 'Analysis failed') if compliance.get('success', False) else 'Analysis failed'
+                                        })
+                                
+                                ai_insights['review_insights'] = review_insights
+                            
+                            # 2. Analyze return reasons with AI
+                            if return_reasons_data:
+                                return_insights = []
+                                for return_data in return_reasons_data[:10]:  # Limit to 10 return reasons
+                                    return_reason = return_data.get('return_reason', '')
+                                    if return_reason:
+                                        analysis = analyze_with_ai(return_reason, 'return_analysis')
+                                        return_insights.append({
+                                            'return_reason': return_reason,
+                                            'analysis': analysis.get('result', 'Analysis failed') if analysis.get('success', False) else 'Analysis failed'
+                                        })
+                                
+                                ai_insights['return_insights'] = return_insights
+                            
+                            # 3. Generate improvement recommendations
+                            if reviews_data or return_reasons_data:
+                                recommendations = generate_improvement_recommendations(
+                                    product_info,
+                                    reviews_data,
+                                    return_reasons_data
+                                )
+                                
+                                if recommendations.get('success', False):
+                                    ai_insights['recommendations'] = recommendations.get('result', 'Recommendation generation failed')
+                            
+                            # Store AI insights in session state
+                            st.session_state.ai_insights[product_info['asin']] = {
+                                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                'insights': ai_insights
+                            }
+                            
+                            st.success("AI analysis complete!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error during AI analysis: {str(e)}")
+                else:
+                    st.error("Please select a product to analyze.")
         else:
-            st.error("Please select a product to analyze.")
+            st.warning("AI-Enhanced Analysis requires OpenAI API key")
 
 def render_analysis_results():
     """Render the analysis results section."""
@@ -650,7 +1031,25 @@ def render_analysis_results():
             
             # Tab 1: Summary
             with tabs[0]:
+                # Display regulatory information
+                if product_info.get('device_class', 'Unknown') != 'Unknown':
+                    st.info(f"FDA Classification: {product_info['device_class']} - {FDA_DEVICE_CLASSES.get(product_info['device_class'], '')}")
+                
                 st.markdown(analysis)
+                
+                # Show return rate benchmarks
+                if product_info.get('return_rate_30d') is not None:
+                    st.subheader("Return Rate Assessment")
+                    
+                    # Define benchmark ranges for medical devices
+                    if product_info['return_rate_30d'] < 2.0:
+                        st.success(f"Return rate ({product_info['return_rate_30d']:.2f}%) is excellent - well below industry average for medical devices")
+                    elif product_info['return_rate_30d'] < 5.0:
+                        st.info(f"Return rate ({product_info['return_rate_30d']:.2f}%) is good - near industry average for medical devices")
+                    elif product_info['return_rate_30d'] < 10.0:
+                        st.warning(f"Return rate ({product_info['return_rate_30d']:.2f}%) is elevated - above industry average for medical devices")
+                    else:
+                        st.error(f"Return rate ({product_info['return_rate_30d']:.2f}%) is high - significantly above industry average for medical devices")
             
             # Tab 2: Detailed Analysis
             with tabs[1]:
@@ -664,19 +1063,34 @@ def render_analysis_results():
                         st.write(f"Average Rating: {review_analysis['average_rating']:.1f}")
                     
                     # Display sentiment breakdown
-                    if review_analysis['sentiment']:
+                    if review_analysis.get('sentiment'):
                         st.subheader("Sentiment Breakdown")
                         sentiment = review_analysis['sentiment']
-                        st.write(f"Positive: {sentiment.get('positive', 0)}")
-                        st.write(f"Neutral: {sentiment.get('neutral', 0)}")
-                        st.write(f"Negative: {sentiment.get('negative', 0)}")
+                        
+                        # Create columns for sentiment display
+                        sent_col1, sent_col2, sent_col3 = st.columns(3)
+                        with sent_col1:
+                            st.metric("Positive", f"{sentiment.get('positive', 0)}")
+                        with sent_col2:
+                            st.metric("Neutral", f"{sentiment.get('neutral', 0)}")
+                        with sent_col3:
+                            st.metric("Negative", f"{sentiment.get('negative', 0)}")
                     
                     # Display common topics
-                    if review_analysis['common_topics']:
+                    if review_analysis.get('common_topics'):
                         st.subheader("Common Topics")
                         topics = sorted(review_analysis['common_topics'].items(), key=lambda x: x[1], reverse=True)
+                        
+                        # Medical device specific topics to highlight
+                        med_device_concerns = ['pain', 'comfort', 'effective', 'quality', 'safety', 
+                                              'adjustable', 'stability', 'support', 'instructions',
+                                              'durable', 'easy', 'fit', 'size', 'material']
+                        
                         for topic, count in topics[:10]:  # Top 10 topics
-                            st.write(f"{topic}: {count} mentions")
+                            if any(concern in topic.lower() for concern in med_device_concerns):
+                                st.warning(f"{topic}: {count} mentions - Medical Device Key Factor")
+                            else:
+                                st.write(f"{topic}: {count} mentions")
                     
                     # Display return reasons if available
                     if 'return_reasons_data' in result and result['return_reasons_data']:
@@ -689,8 +1103,15 @@ def render_analysis_results():
                             else:
                                 unique_reasons[reason] = 1
                         
+                        # Medical device specific return reasons to highlight
+                        med_device_returns = ['defective', 'broke', 'quality', 'safety', 'malfunction', 
+                                             'uncomfortable', 'difficult', 'pain', 'damaged', 'wrong size']
+                        
                         for reason, count in sorted(unique_reasons.items(), key=lambda x: x[1], reverse=True):
-                            st.write(f"{reason}: {count}")
+                            if any(r_word in reason.lower() for r_word in med_device_returns):
+                                st.error(f"{reason}: {count} - Potential Quality Issue")
+                            else:
+                                st.write(f"{reason}: {count}")
                 else:
                     st.write("No detailed analysis available for this product.")
             
@@ -735,6 +1156,20 @@ def render_analysis_results():
                             hole=0.4
                         )
                         st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Display historical trend if available
+                    if 'historical_data' in result and result['historical_data'] is not None:
+                        hist_data = result['historical_data']
+                        if 'Date' in hist_data.columns and 'Return Rate' in hist_data.columns:
+                            st.subheader("Historical Return Rate Trend")
+                            fig = px.line(
+                                hist_data, 
+                                x='Date', 
+                                y='Return Rate',
+                                title="Return Rate Over Time",
+                                markers=True
+                            )
+                            st.plotly_chart(fig, use_container_width=True)
                 else:
                     if not AVAILABLE_MODULES['plotly']:
                         st.warning("Plotly is not available. Visualizations cannot be displayed.")
@@ -791,11 +1226,98 @@ def render_analysis_results():
         else:
             st.info("No analysis results available. Please select and analyze a product.")
 
+def render_ai_insights():
+    """Render the AI insights section."""
+    st.header("AI Insights")
+    
+    if not AVAILABLE_MODULES['ai_api']:
+        st.warning("AI insights require OpenAI API integration. Please add your API key in the Settings panel.")
+        return
+    
+    # Check if we have AI insights to display
+    if not st.session_state.ai_insights:
+        st.info("No AI insights available. Please run an AI-Enhanced Analysis on a product.")
+        return
+    
+    # If we have a current product selected, display its AI insights
+    if st.session_state.current_product:
+        product_asin = st.session_state.current_product['asin']
+        
+        if product_asin in st.session_state.ai_insights:
+            insights = st.session_state.ai_insights[product_asin]
+            product_info = st.session_state.current_product
+            
+            # Display info
+            st.subheader(f"AI Insights for {product_info['name']} ({product_info['asin']})")
+            st.caption(f"Analyzed on: {insights['timestamp']}")
+            
+            # Create tabs for different sections of the AI insights
+            tabs = st.tabs(["Recommendations", "Review Analysis", "Return Analysis"])
+            
+            # Tab 1: Recommendations
+            with tabs[0]:
+                if 'recommendations' in insights['insights']:
+                    st.markdown(insights['insights']['recommendations'])
+                else:
+                    st.info("No AI recommendations available. Run an AI-Enhanced Analysis to generate recommendations.")
+            
+            # Tab 2: Review Analysis
+            with tabs[1]:
+                if 'review_insights' in insights['insights'] and insights['insights']['review_insights']:
+                    review_insights = insights['insights']['review_insights']
+                    
+                    for i, insight in enumerate(review_insights):
+                        with st.expander(f"Review {i+1}: {insight['review'][:50]}... (Rating: {insight['rating']})"):
+                            st.subheader("Original Review")
+                            st.write(insight['review'])
+                            
+                            st.subheader("Sentiment Analysis")
+                            st.markdown(insight['sentiment_analysis'])
+                            
+                            st.subheader("Medical Concerns")
+                            st.markdown(insight['medical_concerns'])
+                            
+                            st.subheader("Compliance Issues")
+                            st.markdown(insight['compliance_issues'])
+                else:
+                    st.info("No AI review insights available. Run an AI-Enhanced Analysis with reviews data to generate insights.")
+            
+            # Tab 3: Return Analysis
+            with tabs[2]:
+                if 'return_insights' in insights['insights'] and insights['insights']['return_insights']:
+                    return_insights = insights['insights']['return_insights']
+                    
+                    for i, insight in enumerate(return_insights):
+                        with st.expander(f"Return Reason {i+1}: {insight['return_reason'][:50]}..."):
+                            st.subheader("Original Return Reason")
+                            st.write(insight['return_reason'])
+                            
+                            st.subheader("AI Analysis")
+                            st.markdown(insight['analysis'])
+                else:
+                    st.info("No AI return insights available. Run an AI-Enhanced Analysis with return reasons data to generate insights.")
+        else:
+            st.warning(f"No AI insights available for {st.session_state.current_product['name']}. Please run an AI-Enhanced Analysis first.")
+    else:
+        # If no current product, let the user select from available analyses
+        available_insights = list(st.session_state.ai_insights.keys())
+        if available_insights:
+            selected_asin = st.selectbox("Select a previously analyzed product:", available_insights)
+            if st.button("Show AI Insights"):
+                # Find the product info from analysis results
+                if selected_asin in st.session_state.analysis_results:
+                    st.session_state.current_product = st.session_state.analysis_results[selected_asin]['product_info']
+                    st.rerun()
+                else:
+                    st.error("Product information not found. Please run a standard analysis first.")
+        else:
+            st.info("No AI insights available. Please select and analyze a product with AI-Enhanced Analysis.")
+
 def render_help_section():
     """Render the help and documentation section."""
     st.header("Help & Documentation")
     
-    help_tabs = st.tabs(["User Guide", "FAQ", "Examples", "Support"])
+    help_tabs = st.tabs(["User Guide", "FAQ", "Medical Device Context", "Support"])
     
     with help_tabs[0]:
         st.subheader("Getting Started")
@@ -807,11 +1329,20 @@ def render_help_section():
         
         2. **Select Product**: Choose the product you want to analyze.
         
-        3. **Run Analysis**: Click the "Analyze Product" button to process the data.
+        3. **Run Analysis**: You have two options:
+           - Standard Analysis: Basic metrics and visualizations
+           - AI-Enhanced Analysis: Deep insights using AI (requires API key)
         
-        4. **Review Results**: Explore the analysis, recommendations, and visualizations.
+        4. **Review Results**: Explore the analysis, recommendations, and visualizations:
+           - Summary: Quick overview of key metrics
+           - Detailed Analysis: In-depth breakdown of reviews and returns
+           - Visualizations: Charts and graphs of the data
+           - Export: Download your analysis results
         
-        5. **Export Reports**: Download the analysis in your preferred format.
+        5. **AI Insights**: Review AI-powered analysis:
+           - Recommendations: Product improvement suggestions
+           - Review Analysis: Detailed breakdown of individual reviews
+           - Return Analysis: Root cause analysis of return reasons
         """)
         
         st.subheader("Required Data Format")
@@ -827,6 +1358,9 @@ def render_help_section():
           * SKU
           * Product Name
           * Category
+          * FDA Device Class
+          * Prescription Status
+          * Product Description
           * Star Rating
           * Total Reviews
           * Last 365 Days Sales
@@ -838,126 +1372,101 @@ def render_help_section():
     with help_tabs[1]:
         st.subheader("Frequently Asked Questions")
         
-        with st.expander("How do I enter data manually?"):
+        with st.expander("How does the AI analysis work?"):
             st.markdown("""
-            1. Go to the "Import" tab and select the "Manual Entry" sub-tab
-            2. Fill in the required fields marked with an asterisk (*)
-            3. Optionally, add reviews and return reasons in the text areas
-            4. Click "Save Product Data" to add the product to your dataset
-            5. You can then analyze this product just like imported data
+            The AI-Enhanced Analysis leverages advanced natural language processing to:
+            
+            1. **Analyze Reviews**: Identifies sentiment, medical concerns, and compliance issues
+            2. **Analyze Return Reasons**: Determines root causes of returns
+            3. **Generate Recommendations**: Provides actionable insights for product improvement
+            
+            The AI is specifically trained to understand medical device terminology and regulatory context,
+            making it ideal for analyzing medical device products sold on Amazon.
+            
+            To use this feature, you need to provide an OpenAI API key in the Settings panel.
             """)
         
-        with st.expander("What types of files can I upload?"):
+        with st.expander("What is FDA Device Classification?"):
             st.markdown("""
-            The application supports:
+            The FDA classifies medical devices into three categories based on risk:
             
-            * **Structured Data**: CSV, Excel (.xlsx, .xls)
-            * **Documents**: PDF, PNG, JPG, JPEG
+            * **Class I**: Low risk devices (e.g., bandages, handheld surgical instruments)
+               - Subject to general controls
+               - Usually exempt from premarket notification (510(k))
             
-            For best results, ensure your CSV/Excel files follow the template format.
+            * **Class II**: Moderate risk devices (e.g., powered wheelchairs, infusion pumps)
+               - Subject to special controls
+               - Usually require premarket notification (510(k))
+            
+            * **Class III**: High risk devices (e.g., implantable pacemakers)
+               - Subject to premarket approval (PMA)
+               - Require clinical trials
+            
+            The AI can help classify your product if you're unsure of its FDA designation.
             """)
         
-        with st.expander("How does the OCR functionality work?"):
+        with st.expander("How can I improve the quality of my analysis?"):
             st.markdown("""
-            The OCR (Optical Character Recognition) function extracts text from:
+            To get the most comprehensive analysis:
             
-            * PDF reports
-            * Screenshots of return data
-            * Images of product listings
+            1. **Provide complete data**: Include as many optional fields as possible
+            2. **Add detailed reviews**: The more review text, the better the AI analysis
+            3. **Include return reasons**: Specific reasons help identify quality issues
+            4. **Add product descriptions**: Helps with device classification and context
+            5. **Use historical data**: Enables trend analysis and pattern detection
             
-            The extracted text is then processed to identify reviews, return reasons, 
-            and other relevant information for analysis.
-            
-            For the best OCR results:
-            
-            * Use high-resolution images
-            * Ensure text is clearly visible
-            * Avoid images with complex backgrounds
-            
-            Note: OCR functionality requires pytesseract and pdf2image to be installed.
+            The AI analysis improves with more context about your product.
             """)
         
-        with st.expander("What if I don't have all the required data?"):
+        with st.expander("How should I use the recommendations?"):
             st.markdown("""
-            The application requires at minimum:
+            The AI recommendations are designed to:
             
-            * ASIN
-            * Last 30 Days Sales
-            * Last 30 Days Returns
+            1. **Identify quality issues**: Potential defects or design flaws
+            2. **Highlight regulatory concerns**: Compliance risks that need attention
+            3. **Suggest improvements**: Product enhancements based on customer feedback
+            4. **Prioritize actions**: Most impactful changes to reduce returns
             
-            Without these minimum fields, analysis cannot be completed. If you're missing 
-            other fields, the application will still function but with potentially less 
-            detailed analysis.
+            Use these insights for:
+            - Product development planning
+            - Quality improvement initiatives
+            - Regulatory compliance checks
+            - Customer communication strategies
+            
+            Always validate AI recommendations with your quality team before implementation.
             """)
     
     with help_tabs[2]:
-        st.subheader("Example Data")
-        
-        st.markdown("### Example 1: CSV Product Data")
-        
-        example_data = [
-            {"SKU": "MOB1116BLU", "ASIN": "B0DT7NW5VY", "Product Name": "Tri-Rollator With Seat", 
-             "Category": "Mobility Aids", "Last 30 Days Sales": 491, "Last 30 Days Returns": 10},
-            {"SKU": "BAT2234RED", "ASIN": "B0DT8XYZ123", "Product Name": "Vive Shower Chair", 
-             "Category": "Bathroom Safety", "Last 30 Days Sales": 325, "Last 30 Days Returns": 8},
-            {"SKU": "KOMF352WHT", "ASIN": "B08CK7MN45", "Product Name": "Comfort Cushion", 
-             "Category": "Comfort Products", "Last 30 Days Sales": 278, "Last 30 Days Returns": 5}
-        ]
-        
-        if AVAILABLE_MODULES['pandas']:
-            st.dataframe(pd.DataFrame(example_data))
-        else:
-            st.markdown("""
-            | SKU | ASIN | Product Name | Category | Last 30 Days Sales | Last 30 Days Returns |
-            | --- | ---- | ------------ | -------- | ----------------- | ------------------- |
-            | MOB1116BLU | B0DT7NW5VY | Tri-Rollator With Seat | Mobility Aids | 491 | 10 |
-            | BAT2234RED | B0DT8XYZ123 | Vive Shower Chair | Bathroom Safety | 325 | 8 |
-            | KOMF352WHT | B08CK7MN45 | Comfort Cushion | Comfort Products | 278 | 5 |
-            """)
-        
-        st.markdown("### Example 2: Return Reasons")
-        
-        example_returns = [
-            {"Order ID": "114-1106156-2607429", "Return Reason": "Item defective or doesn't work", "Return Date": "05/21/2025"},
-            {"Order ID": "113-1770004-6998632", "Return Reason": "Seat too small", "Return Date": "05/09/2025"},
-            {"Order ID": "114-6826075-5417831", "Return Reason": "Bars seem defective", "Return Date": "05/13/2025"}
-        ]
-        
-        if AVAILABLE_MODULES['pandas']:
-            st.dataframe(pd.DataFrame(example_returns))
-        else:
-            st.markdown("""
-            | Order ID | Return Reason | Return Date |
-            | -------- | ------------- | ----------- |
-            | 114-1106156-2607429 | Item defective or doesn't work | 05/21/2025 |
-            | 113-1770004-6998632 | Seat too small | 05/09/2025 |
-            | 114-6826075-5417831 | Bars seem defective | 05/13/2025 |
-            """)
-        
-        st.markdown("### Example 3: Manual Review Entry")
+        st.subheader("Medical Device Context")
         
         st.markdown("""
-        When entering reviews manually, use the format `Rating - Review Text` with one review per line:
+        ### Medical Device Regulations
         
-        ```
-        5 - Love this walker! Very stable and easy to fold.
-        3 - Decent product but assembly instructions could be clearer.
-        2 - Seat is too small for me, not comfortable for longer sitting periods.
-        4 - Good quality but heavier than expected.
-        ```
-        """)
+        Products sold as medical devices, even on Amazon, are subject to various regulations:
         
-        st.markdown("### Example 4: Manual Return Reasons Entry")
+        * **FDA Regulations**: Class I, II, and III classifications with different requirements
+        * **Quality System Regulation (QSR)**: Requirements for design, manufacturing, packaging, etc.
+        * **Medical Device Reporting (MDR)**: Mandatory reporting of adverse events
+        * **Labeling Requirements**: Specific content and format for labels and instructions
         
-        st.markdown("""
-        When entering return reasons manually, put one reason per line:
+        ### Common Medical Device Issues
         
-        ```
-        Item too small for customer
-        Defective wheel locking mechanism
-        Customer ordered wrong color
-        Assembly difficulty
-        ```
+        Medical devices sold on Amazon often face these specific challenges:
+        
+        * **User Expectations**: Consumers may expect medical-grade performance from wellness products
+        * **Regulatory Grey Areas**: Some products exist between medical device and consumer product categories
+        * **Return Rate Considerations**: Medical devices typically have higher acceptable return rates (3-8%) compared to general consumer products (1-3%)
+        * **Special Quality Concerns**: Safety, effectiveness, and durability are especially important
+        
+        ### Using This Tool for Medical Devices
+        
+        This tool is specifically designed to help with:
+        
+        * Identifying potential regulatory compliance issues
+        * Detecting safety concerns from customer feedback
+        * Understanding quality issues specific to medical devices
+        * Benchmarking return rates against medical device standards
+        * Generating improvement recommendations with regulatory context
         """)
     
     with help_tabs[3]:
