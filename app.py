@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 # Constants
 SUPPORT_EMAIL = "alexander.popoff@vivehealth.com"
-API_KEY_NAME = "OPENAI_API_KEY"  # For storing in streamlit secrets
+API_KEY_NAME = "openai_api_key"  # Variable name in streamlit app settings
 
 # Track available modules
 AVAILABLE_MODULES = {
@@ -89,7 +89,12 @@ try:
     from openai import OpenAI  # Import the OpenAI client class for newer SDK
     
     # Get API key from Streamlit secrets
-    api_key = st.secrets.get(API_KEY_NAME)
+    # Try to get the API key directly from st.secrets dictionary
+    try:
+        api_key = st.secrets["openai_api_key"]
+    except:
+        # Fallback to the get method which returns None if key doesn't exist
+        api_key = st.secrets.get(API_KEY_NAME)
     
     if api_key:
         # Set up the client - works with both legacy and new SDK
@@ -102,7 +107,7 @@ try:
             AVAILABLE_MODULES['ai_api'] = True
             logger.info("OpenAI API initialized successfully from secrets (legacy)")
     else:
-        logger.warning("OpenAI API key not found in Streamlit secrets")
+        logger.warning("OpenAI API key not found in Streamlit secrets as 'openai_api_key'")
 except ImportError:
     logger.warning("OpenAI module not available")
 except Exception as e:
@@ -458,7 +463,7 @@ def main():
             st.metric("AI API Calls", st.session_state.ai_api_calls)
         else:
             st.error("❌ OpenAI API not configured")
-            st.info("Add OPENAI_API_KEY to your Streamlit secrets.toml file")
+            st.info("API key should be named 'openai_api_key' in your Streamlit app settings")
     
     # Main content tabs
     tabs = st.tabs(["Import", "Analyze", "Listing Optimization", "AI Insights", "Help"])
@@ -1200,7 +1205,7 @@ def render_product_selection():
                 else:
                     st.error("Please select a product to analyze.")
         else:
-            st.warning("AI-Enhanced Analysis requires OpenAI API key in Streamlit secrets")
+            st.warning("AI-Enhanced Analysis requires OpenAI API key in Streamlit app settings")
 
 def render_listing_optimization():
     """Render the listing optimization section."""
@@ -2081,7 +2086,7 @@ def render_ai_insights():
     st.header("AI Insights")
     
     if not AVAILABLE_MODULES['ai_api']:
-        st.warning("AI insights require OpenAI API integration. Please add your API key to Streamlit secrets.")
+        st.warning("AI insights require OpenAI API integration. Please add an API key named 'openai_api_key' in your Streamlit app settings.")
         return
     
     # Check if we have AI insights to display
@@ -2594,7 +2599,7 @@ def render_help_section():
         - Return reason categorization
         """)
         
-        st.warning("Note: The AI requires your OpenAI API key to be configured in Streamlit secrets. The API key should be stored as 'OPENAI_API_KEY' in your secrets.toml file.")
+        st.warning("Note: The AI requires your OpenAI API key to be configured in Streamlit app settings. The API key should be named 'openai_api_key'.")
     
     with help_tabs[3]:
         st.subheader("Support Resources")
