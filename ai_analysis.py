@@ -60,13 +60,19 @@ def get_api_key():
     # First, try to get from streamlit secrets
     try:
         import streamlit as st
-        if hasattr(st, 'secrets') and "openai_api_key" in st.secrets:
-            return st.secrets["openai_api_key"]
-    except (ImportError, AttributeError):
-        pass
+        # Try different possible key names
+        for key_name in ["openai_api_key", "OPENAI_API_KEY"]:
+            if hasattr(st, 'secrets') and key_name in st.secrets:
+                logger.info(f"Found API key in Streamlit secrets as '{key_name}'")
+                return st.secrets[key_name]
+    except (ImportError, AttributeError) as e:
+        logger.warning(f"Error accessing Streamlit secrets: {str(e)}")
     
     # Then try environment variable as fallback
-    return os.environ.get("OPENAI_API_KEY")
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if api_key:
+        logger.info("Found API key in environment variables")
+    return api_key
 
 def call_openai_api(messages, model="gpt-4o", temperature=0.1, max_tokens=1000):
     """
@@ -84,7 +90,7 @@ def call_openai_api(messages, model="gpt-4o", temperature=0.1, max_tokens=1000):
     api_key = get_api_key()
     
     if not api_key:
-        logger.error("OpenAI API key not found")
+        logger.error("OpenAI API key not found in any location")
         return None
     
     try:
@@ -100,6 +106,7 @@ def call_openai_api(messages, model="gpt-4o", temperature=0.1, max_tokens=1000):
             "max_tokens": max_tokens
         }
         
+        logger.info(f"Calling OpenAI API with model {model}")
         response = requests.post(
             "https://api.openai.com/v1/chat/completions",
             headers=headers,
@@ -108,6 +115,7 @@ def call_openai_api(messages, model="gpt-4o", temperature=0.1, max_tokens=1000):
         )
         
         if response.status_code == 200:
+            logger.info("OpenAI API call successful")
             return response.json()["choices"][0]["message"]["content"]
         else:
             logger.error(f"API error: {response.status_code} - {response.text}")
