@@ -3,14 +3,25 @@ import re
 import logging
 import pandas as pd
 from PIL import Image
-import pytesseract
-from pdf2image import convert_from_bytes
 import tempfile
 
 logger = logging.getLogger(__name__)
 
+# Check if OCR dependencies are available
+OCR_AVAILABLE = False
+try:
+    import pytesseract
+    from pdf2image import convert_from_bytes
+    OCR_AVAILABLE = True
+    logger.info("OCR dependencies are available")
+except ImportError:
+    logger.warning("OCR dependencies (pytesseract, pdf2image) are not available")
+
 def process_pdf_with_ocr(pdf_bytes):
     """Extract text from PDF using OCR."""
+    if not OCR_AVAILABLE:
+        return "OCR processing not available. Install pytesseract and pdf2image."
+    
     try:
         # Convert PDF to images
         with tempfile.TemporaryDirectory() as path:
@@ -29,6 +40,9 @@ def process_pdf_with_ocr(pdf_bytes):
 
 def process_image_with_ocr(image_bytes):
     """Extract text from image using OCR."""
+    if not OCR_AVAILABLE:
+        return "OCR processing not available. Install pytesseract."
+    
     try:
         # Open image from bytes
         img = Image.open(io.BytesIO(image_bytes))
@@ -42,6 +56,10 @@ def process_image_with_ocr(image_bytes):
 
 def extract_amazon_returns_data(ocr_text):
     """Extract Amazon returns data from OCR text."""
+    # Just perform basic text analysis if OCR is not available
+    if not OCR_AVAILABLE:
+        return "Text analysis available, but OCR extraction is not available."
+    
     # Patterns for Amazon returns page
     order_id_pattern = r"Order ID:\s+([\w\-]+)"
     return_reason_pattern = r"Return Reason:\s+(.*?)(?=Buyer Comment:|Request Date:|$)"
@@ -72,6 +90,10 @@ def extract_amazon_returns_data(ocr_text):
 
 def extract_amazon_reviews_data(ocr_text):
     """Extract Amazon reviews data from OCR text."""
+    # Just perform basic text analysis if OCR is not available
+    if not OCR_AVAILABLE:
+        return {"overall_rating": None, "reviews": []}
+    
     # Patterns for Amazon reviews
     review_pattern = r"((?:\d+ star|★+)[^\n]*?)(?=\d+ star|★+|$)"
     star_rating_pattern = r"(\d+(?:\.\d+)?) out of 5"
@@ -107,56 +129,11 @@ def extract_amazon_reviews_data(ocr_text):
         "reviews": reviews_data
     }
 
-def extract_voc_data(ocr_text):
-    """Extract Voice of Customer data from OCR text."""
-    # This function extracts structured data from the Voice of Customer section
-    # The exact patterns will depend on the format of your VOC data
-    
-    # Sample patterns for the provided examples
-    product_pattern = r"(Vive \d+ Wheel Walker[^-]*)-(.*?)(?=ASIN|$)"
-    asin_pattern = r"ASIN\s*([A-Z0-9]+)"
-    sku_pattern = r"SKU\s*([A-Z0-9]+)"
-    star_rating_pattern = r"Star rating\s*([★☆]+)"
-    return_rate_pattern = r"Return rate\s*(.*?)(?=\n|$)"
-    
-    # Extract data
-    product_match = re.search(product_pattern, ocr_text)
-    product_name = product_match.group(0) if product_match else None
-    
-    asin_match = re.search(asin_pattern, ocr_text)
-    asin = asin_match.group(1) if asin_match else None
-    
-    sku_match = re.search(sku_pattern, ocr_text)
-    sku = sku_match.group(1) if sku_match else None
-    
-    # Extract comments sections
-    returns_section = re.search(r"Returns(.*?)Reviews", ocr_text, re.DOTALL)
-    returns_text = returns_section.group(1) if returns_section else ""
-    
-    reviews_section = re.search(r"Reviews(.*?)(?:Other sources|$)", ocr_text, re.DOTALL)
-    reviews_text = reviews_section.group(1) if reviews_section else ""
-    
-    # Process returns
-    return_items = re.findall(r"Order ID:[^\n]*\n(.*?)(?=Order ID:|$)", returns_text, re.DOTALL)
-    returns = [item.strip() for item in return_items if item.strip()]
-    
-    # Process reviews
-    review_items = re.findall(r"(?:Frame|Vive)[^\n]*\n(.*?)(?=Frame|Vive|$)", reviews_text, re.DOTALL)
-    reviews = [item.strip() for item in review_items if item.strip()]
-    
-    # Create structured data
-    voc_data = {
-        "product_name": product_name,
-        "asin": asin,
-        "sku": sku,
-        "returns": returns,
-        "reviews": reviews
-    }
-    
-    return voc_data
-
 def convert_ocr_to_dataframe(extracted_data):
     """Convert extracted OCR data to pandas DataFrame."""
+    if not OCR_AVAILABLE:
+        return pd.DataFrame()
+    
     if not extracted_data:
         return pd.DataFrame()
     
@@ -170,36 +147,3 @@ def convert_ocr_to_dataframe(extracted_data):
     
     # If it's a different format, create a simple one-row dataframe
     return pd.DataFrame([extracted_data])
-
-def process_document(file_bytes, file_name):
-    """Process a document file and extract structured data."""
-    file_ext = file_name.split('.')[-1].lower()
-    
-    # Extract text using appropriate method
-    if file_ext == 'pdf':
-        text = process_pdf_with_ocr(file_bytes)
-    elif file_ext in ['png', 'jpg', 'jpeg']:
-        text = process_image_with_ocr(file_bytes)
-    else:
-        return None, f"Unsupported file type: {file_ext}"
-    
-    # Determine document type based on content patterns
-    if "Order ID:" in text and "Return Reason:" in text:
-        data = extract_amazon_returns_data(text)
-        doc_type = "amazon_returns"
-    elif "Voice of the Customer" in text:
-        data = extract_voc_data(text)
-        doc_type = "voice_of_customer"
-    elif "Customer reviews" in text or "star rating" in text:
-        data = extract_amazon_reviews_data(text)
-        doc_type = "amazon_reviews"
-    else:
-        # Generic text extraction if we can't identify a specific format
-        data = {"raw_text": text}
-        doc_type = "generic_text"
-    
-    return {
-        "type": doc_type,
-        "data": data,
-        "raw_text": text
-    }
