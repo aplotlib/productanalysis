@@ -1,13 +1,32 @@
 import pandas as pd
 import numpy as np
-import plotly.express as px
-import plotly.graph_objects as go
 from collections import Counter
 import json
 import re
 import logging
+import io
 
 logger = logging.getLogger(__name__)
+
+# Check if visualization dependencies are available
+PLOTLY_AVAILABLE = False
+try:
+    import plotly.express as px
+    import plotly.graph_objects as go
+    PLOTLY_AVAILABLE = True
+    logger.info("Plotly is available for visualization")
+except ImportError:
+    logger.warning("Plotly is not available for visualization")
+
+def safe_divide(a: float, b: float, default: float = 0.0) -> float:
+    """Safely divide two numbers, returning a default if divisor is zero."""
+    try:
+        if b == 0:
+            return default
+        return a / b
+    except Exception as e:
+        logger.error(f"Error in safe_divide: {str(e)}")
+        return default
 
 def calculate_product_metrics(product_data):
     """Calculate key metrics from product data."""
@@ -181,6 +200,9 @@ def analyze_reviews(reviews_data):
 
 def create_return_reasons_chart(return_analysis):
     """Create a pie chart of return reasons."""
+    if not PLOTLY_AVAILABLE:
+        return None
+        
     reason_counts = return_analysis.get('reason_counts', {})
     if not reason_counts:
         return None
@@ -213,6 +235,9 @@ def create_return_reasons_chart(return_analysis):
 
 def create_sentiment_chart(review_analysis):
     """Create a sentiment chart from review analysis."""
+    if not PLOTLY_AVAILABLE:
+        return None
+        
     sentiment = review_analysis.get('sentiment', {})
     if not sentiment:
         return None
@@ -247,6 +272,9 @@ def create_sentiment_chart(review_analysis):
 
 def create_rating_distribution_chart(review_analysis):
     """Create a chart showing rating distribution."""
+    if not PLOTLY_AVAILABLE:
+        return None
+        
     rating_dist = review_analysis.get('rating_distribution', {})
     if not rating_dist:
         return None
@@ -291,6 +319,9 @@ def create_rating_distribution_chart(review_analysis):
 
 def create_topics_chart(review_analysis):
     """Create a chart showing common topics in reviews."""
+    if not PLOTLY_AVAILABLE:
+        return None
+        
     topics = review_analysis.get('common_topics', {})
     if not topics:
         return None
@@ -364,64 +395,62 @@ def create_excel_report(report_data):
     """Create Excel report from structured report data."""
     # Create a writer object
     output = io.BytesIO()
-    writer = pd.ExcelWriter(output, engine='xlsxwriter')
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        # Product Info Sheet
+        product_df = pd.DataFrame([report_data['product_info']])
+        product_df.to_excel(writer, sheet_name='Product Info', index=False)
+        
+        # Metrics Sheet
+        metrics = {
+            **report_data['sales_metrics'],
+            'total_reviews': report_data['review_metrics']['total_reviews'],
+            'average_rating': report_data['review_metrics']['average_rating']
+        }
+        metrics_df = pd.DataFrame([metrics])
+        metrics_df.to_excel(writer, sheet_name='Metrics', index=False)
+        
+        # Return Reasons Sheet
+        if report_data['return_analysis']['reason_counts']:
+            reasons_df = pd.DataFrame([
+                {'Reason': k, 'Count': v} 
+                for k, v in report_data['return_analysis']['reason_counts'].items()
+            ])
+            reasons_df.to_excel(writer, sheet_name='Return Reasons', index=False)
+        
+        # Rating Distribution Sheet
+        if report_data['review_metrics']['rating_distribution']:
+            ratings_df = pd.DataFrame([
+                {'Rating': k, 'Count': v} 
+                for k, v in report_data['review_metrics']['rating_distribution'].items()
+            ])
+            ratings_df.to_excel(writer, sheet_name='Rating Distribution', index=False)
+        
+        # Common Topics Sheet
+        if report_data['review_analysis']['common_topics']:
+            topics_df = pd.DataFrame([
+                {'Topic': k, 'Mentions': v} 
+                for k, v in report_data['review_analysis']['common_topics'].items()
+            ])
+            topics_df.to_excel(writer, sheet_name='Common Topics', index=False)
+        
+        # Format workbook
+        workbook = writer.book
+        
+        # Add a header format
+        header_format = workbook.add_format({
+            'bold': True,
+            'text_wrap': True,
+            'valign': 'top',
+            'fg_color': '#D7E4BC',
+            'border': 1
+        })
+        
+        # Apply the header format to each sheet
+        for sheet_name in writer.sheets:
+            worksheet = writer.sheets[sheet_name]
+            for col_num, value in enumerate(pd.DataFrame([{}]).columns.values):
+                worksheet.write(0, col_num, value, header_format)
     
-    # Product Info Sheet
-    product_df = pd.DataFrame([report_data['product_info']])
-    product_df.to_excel(writer, sheet_name='Product Info', index=False)
-    
-    # Metrics Sheet
-    metrics = {
-        **report_data['sales_metrics'],
-        'total_reviews': report_data['review_metrics']['total_reviews'],
-        'average_rating': report_data['review_metrics']['average_rating']
-    }
-    metrics_df = pd.DataFrame([metrics])
-    metrics_df.to_excel(writer, sheet_name='Metrics', index=False)
-    
-    # Return Reasons Sheet
-    if report_data['return_analysis']['reason_counts']:
-        reasons_df = pd.DataFrame([
-            {'Reason': k, 'Count': v} 
-            for k, v in report_data['return_analysis']['reason_counts'].items()
-        ])
-        reasons_df.to_excel(writer, sheet_name='Return Reasons', index=False)
-    
-    # Rating Distribution Sheet
-    if report_data['review_metrics']['rating_distribution']:
-        ratings_df = pd.DataFrame([
-            {'Rating': k, 'Count': v} 
-            for k, v in report_data['review_metrics']['rating_distribution'].items()
-        ])
-        ratings_df.to_excel(writer, sheet_name='Rating Distribution', index=False)
-    
-    # Common Topics Sheet
-    if report_data['review_analysis']['common_topics']:
-        topics_df = pd.DataFrame([
-            {'Topic': k, 'Mentions': v} 
-            for k, v in report_data['review_analysis']['common_topics'].items()
-        ])
-        topics_df.to_excel(writer, sheet_name='Common Topics', index=False)
-    
-    # Format workbook
-    workbook = writer.book
-    
-    # Add a header format
-    header_format = workbook.add_format({
-        'bold': True,
-        'text_wrap': True,
-        'valign': 'top',
-        'fg_color': '#D7E4BC',
-        'border': 1
-    })
-    
-    # Apply the header format to each sheet
-    for sheet_name in writer.sheets:
-        worksheet = writer.sheets[sheet_name]
-        for col_num, value in enumerate(pd.DataFrame([{}]).columns.values):
-            worksheet.write(0, col_num, value, header_format)
-    
-    # Save and return
-    writer.close()
+    # Return the Excel binary data
     output.seek(0)
     return output
