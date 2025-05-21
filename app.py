@@ -83,24 +83,30 @@ try:
 except ImportError:
     logger.warning("OCR modules not available")
 
-# Try importing OpenAI - for AI analysis
+# Try importing OpenAI - for AI analysis - Always use streamlit secrets
 try:
     import openai
     from openai import OpenAI  # Import the OpenAI client class for newer SDK
-    # Check if we can actually use the API
-    api_key = os.environ.get(API_KEY_NAME) or st.secrets.get(API_KEY_NAME, None)
+    
+    # Get API key from Streamlit secrets
+    api_key = st.secrets.get(API_KEY_NAME)
+    
     if api_key:
         # Set up the client - works with both legacy and new SDK
         if hasattr(openai, 'OpenAI'):  # Check if using newer OpenAI SDK (v1.0.0+)
             client = OpenAI(api_key=api_key)
             AVAILABLE_MODULES['ai_api'] = True
+            logger.info("OpenAI API client initialized successfully from secrets")
         else:  # Legacy SDK (<v1.0.0)
             openai.api_key = api_key
             AVAILABLE_MODULES['ai_api'] = True
+            logger.info("OpenAI API initialized successfully from secrets (legacy)")
     else:
-        logger.warning("OpenAI API key not found in environment or secrets")
+        logger.warning("OpenAI API key not found in Streamlit secrets")
 except ImportError:
     logger.warning("OpenAI module not available")
+except Exception as e:
+    logger.error(f"Error initializing OpenAI: {str(e)}")
 
 # Try importing local modules - use safe imports
 try:
@@ -127,14 +133,45 @@ if 'current_product' not in st.session_state:
 if 'ai_insights' not in st.session_state:
     st.session_state.ai_insights = {}
 
-# Medical device classification constants
-FDA_DEVICE_CLASSES = {
-    'Class I': 'Low risk, subject to general controls',
-    'Class II': 'Moderate risk, subject to special controls', 
-    'Class III': 'High risk, subject to premarket approval'
+# Example preloaded data
+EXAMPLE_DATA = {
+    "structured_data": pd.DataFrame({
+        "ASIN": ["B08HMCVJ8L", "B09X5DL3WK", "B07PDMJR4Q"],
+        "SKU": ["VH-KNE01", "VH-BPM23", "VH-WCH14"],
+        "Product Name": ["Premium Knee Brace", "Blood Pressure Monitor", "Folding Wheelchair"],
+        "Category": ["Orthopedic Support", "Blood Pressure Monitors", "Mobility Aids"],
+        "Last 30 Days Sales": [230, 185, 42],
+        "Last 30 Days Returns": [12, 24, 5],
+        "Last 365 Days Sales": [2850, 1950, 520],
+        "Last 365 Days Returns": [142, 198, 61],
+        "Star Rating": [4.6, 3.9, 4.3],
+        "Total Reviews": [312, 246, 87],
+        "Product Description": [
+            "Supportive knee brace for sports injuries and arthritis relief.",
+            "Digital blood pressure monitor with large display and memory function.",
+            "Lightweight folding wheelchair with padded armrests and swing-away footrests."
+        ]
+    }),
+    "manual_reviews": {
+        "B08HMCVJ8L": [
+            {"rating": 5, "review_text": "This knee brace is amazing! Significant pain relief and very comfortable to wear all day.", "asin": "B08HMCVJ8L"},
+            {"rating": 4, "review_text": "Good quality and support, but the sizing runs a bit small. I had to return the first one.", "asin": "B08HMCVJ8L"},
+            {"rating": 5, "review_text": "Using this for my recovery after ACL surgery and it provides perfect support.", "asin": "B08HMCVJ8L"},
+            {"rating": 2, "review_text": "The velcro started coming off after just 2 weeks of use. Disappointed with durability.", "asin": "B08HMCVJ8L"},
+            {"rating": 5, "review_text": "Best knee brace I've tried. The adjustable straps make it perfect for my needs.", "asin": "B08HMCVJ8L"}
+        ]
+    },
+    "manual_returns": {
+        "B08HMCVJ8L": [
+            {"return_reason": "Too small - needs larger size", "asin": "B08HMCVJ8L"},
+            {"return_reason": "Velcro stopped sticking after a few uses", "asin": "B08HMCVJ8L"},
+            {"return_reason": "Not comfortable enough for all-day wear", "asin": "B08HMCVJ8L"},
+            {"return_reason": "Didn't provide enough support for my knee", "asin": "B08HMCVJ8L"}
+        ]
+    }
 }
 
-# Common medical device categories for Amazon
+# Amazon product categories for medical devices
 MED_DEVICE_CATEGORIES = [
     "Mobility Aids", 
     "Bathroom Safety", 
@@ -151,10 +188,21 @@ MED_DEVICE_CATEGORIES = [
     "Other"
 ]
 
+# Amazon listing optimization metrics
+LISTING_METRICS = {
+    "Title Effectiveness": "How well the product title attracts clicks and conveys key features",
+    "Bullet Points": "Quality and conversion focus of the key feature bullet points",
+    "Description Quality": "Effectiveness of the product description",
+    "Image Quality": "Clarity, quantity, and sales effectiveness of product images",
+    "Keywords Coverage": "How well the listing covers relevant search terms",
+    "Q&A Completeness": "Addresses common customer questions proactively",
+    "Review Response": "Seller engagement with customer reviews"
+}
+
 # Setup the Streamlit page
 st.set_page_config(
-    page_title="Medical Device Review Analysis Tool",
-    page_icon="🩺",
+    page_title="Amazon Medical Device Listing Optimizer",
+    page_icon="⚕️",
     layout="wide"
 )
 
@@ -174,39 +222,51 @@ if AVAILABLE_MODULES['ai_api']:
         try:
             prompt = ""
             if analysis_type == 'sentiment':
-                prompt = f"""Analyze the sentiment of this product review for a medical device. 
-                Consider medical-specific language and concerns. Extract concerns about safety, 
-                efficacy, comfort, ease of use, and durability. Classify the overall sentiment 
-                as positive, negative, or neutral.
+                prompt = f"""Analyze the sentiment of this Amazon review for a medical device. 
+                Focus on identifying key factors that influence the customer's purchase decision 
+                and satisfaction. Extract specific feedback about product features, quality, 
+                packaging, and usability. Classify the sentiment as positive, negative, or neutral.
                 
                 Review: {text}
                 """
-            elif analysis_type == 'medical_concerns':
-                prompt = f"""Identify any medical concerns or adverse events mentioned in this review 
-                for a medical device. Flag any mentions of: pain, discomfort, injury, malfunction, 
-                inaccuracy, allergic reactions, or other health-related issues. Also extract any 
-                mentions of specific medical conditions or treatments.
+            elif analysis_type == 'listing_optimization':
+                prompt = f"""Analyze this Amazon medical device listing text and identify 
+                specific improvements to increase conversion rate and sales. Focus on:
+                1. SEO optimization for Amazon's A9 algorithm
+                2. Clarity of features and benefits
+                3. Competitive differentiation
+                4. Customer pain points addressed
+                5. Social proof elements
                 
-                Review: {text}
-                """
-            elif analysis_type == 'compliance_issues':
-                prompt = f"""Analyze this medical device product review for potential regulatory 
-                compliance issues. Flag if the review mentions: product claims beyond labeled use, 
-                product defects, safety issues, manufacturing quality concerns, or potential 
-                reportable events. Categorize the compliance risk as: none, low, medium, or high.
-                
-                Review: {text}
+                Listing: {text}
                 """
             elif analysis_type == 'return_analysis':
-                prompt = f"""Analyze this medical device return reason to identify root causes. 
-                Determine if the return is due to: defect, user error, unmet expectations, 
-                competitive comparison, medical efficacy, comfort, or sizing issues.
+                prompt = f"""Analyze this return reason for an Amazon medical device 
+                product to identify actionable improvements. Determine if the return 
+                relates to:
+                1. Product design or quality issues
+                2. Customer expectation mismatch
+                3. Listing accuracy problems (images, description)
+                4. Sizing or fit issues
+                5. Packaging or delivery problems
                 
                 Return reason: {text}
                 """
+            elif analysis_type == 'image_feedback':
+                prompt = f"""Review this description of a product image for an Amazon 
+                medical device listing. Identify improvements to make the image more 
+                effective for conversion, including:
+                1. Clarity and professional appearance
+                2. Feature demonstration
+                3. Size/scale reference
+                4. Use case visualization
+                5. Competitive differentiation
+                
+                Image description: {text}
+                """
             
             messages = [
-                {"role": "system", "content": "You are an expert in medical device quality analysis, FDA regulations, and customer feedback interpretation."},
+                {"role": "system", "content": "You are an expert Amazon listing optimization specialist who helps medical device companies maximize their e-commerce sales and minimize returns."},
                 {"role": "user", "content": prompt}
             ]
             
@@ -215,16 +275,16 @@ if AVAILABLE_MODULES['ai_api']:
                 response = client.chat.completions.create(
                     model="gpt-4o",
                     messages=messages,
-                    max_tokens=500,
-                    temperature=0.1
+                    max_tokens=750,
+                    temperature=0.2
                 )
                 result = response.choices[0].message.content
             else:  # Legacy SDK (<v1.0.0)
                 response = openai.ChatCompletion.create(
                     model="gpt-4o",
                     messages=messages,
-                    max_tokens=500,
-                    temperature=0.1
+                    max_tokens=750,
+                    temperature=0.2
                 )
                 result = response.choices[0].message.content
                 
@@ -233,35 +293,38 @@ if AVAILABLE_MODULES['ai_api']:
             logger.error(f"AI analysis error: {str(e)}")
             return {"success": False, "error": str(e)}
     
-    def classify_medical_device(product_name, category, description=""):
+    def analyze_listing_optimization(product_info):
         """
-        Use AI to classify a medical device according to FDA risk classes
+        Use AI to analyze and provide recommendations for Amazon listing optimization
         
         Parameters:
-        - product_name: Name of the product
-        - category: Product category
-        - description: Product description if available
+        - product_info: Dictionary with product details
         
         Returns:
-        - Dictionary with classification and reasoning
+        - Dictionary with optimization recommendations
         """
         try:
-            prompt = f"""Classify the following medical device according to FDA risk classes (I, II, or III).
-            Consider the device type, intended use, and risk profile.
+            prompt = f"""Analyze this Amazon medical device product and provide actionable 
+            recommendations to optimize the listing for higher conversion rates and reduced returns.
             
-            Product name: {product_name}
-            Category: {category}
-            Description: {description}
+            Product name: {product_info.get('name', 'Unknown')}
+            Category: {product_info.get('category', 'Medical Device')}
+            Description: {product_info.get('description', '')}
+            30-Day Return Rate: {product_info.get('return_rate_30d', 'N/A')}%
+            Star Rating: {product_info.get('star_rating', 'N/A')}
             
             Provide the following:
-            1. Likely FDA class (I, II, or III)
-            2. Brief reasoning for the classification
-            3. Potential regulatory considerations
-            4. Whether the device likely requires prescription or is OTC
+            1. Title optimization recommendations (for better CTR and keyword relevance)
+            2. Bullet points strategy (highlight key benefits and features)
+            3. Description improvements (storytelling and problem-solution format)
+            4. Image optimization suggestions (specific shots and demonstrations needed)
+            5. Keywords to target for this specific medical device
+            6. A+ Content recommendations (if applicable)
+            7. Common customer questions to address proactively
             """
             
             messages = [
-                {"role": "system", "content": "You are an expert in medical device regulatory classification, FDA regulations, and compliance requirements."},
+                {"role": "system", "content": "You are an expert Amazon listing optimization specialist who helps medical device companies maximize their e-commerce sales and minimize returns."},
                 {"role": "user", "content": prompt}
             ]
             
@@ -270,27 +333,27 @@ if AVAILABLE_MODULES['ai_api']:
                 response = client.chat.completions.create(
                     model="gpt-4o",
                     messages=messages,
-                    max_tokens=500,
-                    temperature=0.1
+                    max_tokens=1000,
+                    temperature=0.2
                 )
                 result = response.choices[0].message.content
             else:  # Legacy SDK (<v1.0.0)
                 response = openai.ChatCompletion.create(
                     model="gpt-4o",
                     messages=messages,
-                    max_tokens=500,
-                    temperature=0.1
+                    max_tokens=1000,
+                    temperature=0.2
                 )
                 result = response.choices[0].message.content
             
             return {"success": True, "result": result}
         except Exception as e:
-            logger.error(f"Device classification error: {str(e)}")
+            logger.error(f"Listing optimization error: {str(e)}")
             return {"success": False, "error": str(e)}
     
     def generate_improvement_recommendations(product_info, reviews_data, returns_data):
         """
-        Generate AI-powered recommendations for product improvements
+        Generate AI-powered recommendations for product improvements based on reviews and returns
         
         Parameters:
         - product_info: Dictionary with product details
@@ -308,8 +371,8 @@ if AVAILABLE_MODULES['ai_api']:
             returns_text = "\n".join([f"Return reason: {r.get('return_reason', '')}" 
                                      for r in returns_data[:20]])  # Limit to 20 return reasons
             
-            prompt = f"""As a medical device quality expert, analyze the following product data and provide
-            improvement recommendations:
+            prompt = f"""As an Amazon listing optimization specialist for medical devices, analyze the following 
+            product data and provide actionable recommendations:
             
             Product: {product_info.get('name', 'Unknown')}
             Category: {product_info.get('category', 'Medical Device')}
@@ -322,15 +385,17 @@ if AVAILABLE_MODULES['ai_api']:
             Return Reasons:
             {returns_text}
             
-            Based on this data, provide:
-            1. Top 3-5 actionable improvement recommendations
-            2. Potential quality issues requiring investigation
-            3. Risk assessment from a regulatory perspective
-            4. Competitive differentiation opportunities
+            Please provide:
+            1. Top 3-5 product improvement recommendations based on customer feedback
+            2. Specific listing improvements to reduce return rate
+            3. New or improved image recommendations based on customer confusion
+            4. Keywords and features to emphasize based on positive reviews
+            5. Features that need better explanation in the listing
+            6. Competitive differentiators to highlight more prominently
             """
             
             messages = [
-                {"role": "system", "content": "You are an expert in medical device quality improvement, FDA regulations, and customer experience optimization."},
+                {"role": "system", "content": "You are an expert Amazon listing optimization specialist who helps medical device companies maximize their e-commerce sales and minimize returns."},
                 {"role": "user", "content": prompt}
             ]
             
@@ -339,7 +404,7 @@ if AVAILABLE_MODULES['ai_api']:
                 response = client.chat.completions.create(
                     model="gpt-4o",
                     messages=messages,
-                    max_tokens=1000,
+                    max_tokens=1200,
                     temperature=0.2
                 )
                 result = response.choices[0].message.content
@@ -347,7 +412,7 @@ if AVAILABLE_MODULES['ai_api']:
                 response = openai.ChatCompletion.create(
                     model="gpt-4o",
                     messages=messages,
-                    max_tokens=1000,
+                    max_tokens=1200,
                     temperature=0.2
                 )
                 result = response.choices[0].message.content
@@ -360,13 +425,19 @@ if AVAILABLE_MODULES['ai_api']:
 def main():
     """Main application entry point."""
     # Render header
-    st.title("Medical Device Review Analysis Tool")
-    st.subheader("Analyze product reviews, ratings, and returns for medical devices on Amazon")
+    st.title("Amazon Medical Device Listing Optimizer")
+    st.subheader("Optimize product listings, reduce returns, and improve ratings for medical devices on Amazon")
     
     # Display available modules in sidebar
     with st.sidebar:
         st.header("Settings")
         st.write("Contact support: " + SUPPORT_EMAIL)
+        
+        # 1-click example loader
+        if st.button("Load Example Data", type="primary"):
+            st.session_state.uploaded_files = EXAMPLE_DATA.copy()
+            st.success("Example data loaded successfully!")
+            st.rerun()
         
         st.subheader("Available Modules")
         for module, available in AVAILABLE_MODULES.items():
@@ -375,41 +446,22 @@ def main():
             else:
                 st.error(f"❌ {module}")
         
-        # AI API Configuration (if not available)
-        if not AVAILABLE_MODULES['ai_api']:
-            st.warning("AI analysis requires an OpenAI API key")
-            api_key = st.text_input("Enter OpenAI API Key", type="password")
-            if api_key and st.button("Save API Key"):
-                # In a production app, this should be stored securely
-                os.environ[API_KEY_NAME] = api_key
-                try:
-                    import openai
-                    # Check which version of the OpenAI SDK is being used
-                    if hasattr(openai, 'OpenAI'):  # New SDK (v1.0.0+)
-                        from openai import OpenAI
-                        client = OpenAI(api_key=api_key)
-                        # Test the key with a minimal call
-                        client.chat.completions.create(
-                            model="gpt-4o",
-                            messages=[{"role": "user", "content": "Test"}],
-                            max_tokens=5
-                        )
-                    else:  # Legacy SDK (<v1.0.0)
-                        openai.api_key = api_key
-                        # Test the key
-                        openai.ChatCompletion.create(
-                            model="gpt-4o",
-                            messages=[{"role": "user", "content": "Test"}],
-                            max_tokens=5
-                        )
-                    AVAILABLE_MODULES['ai_api'] = True
-                    st.success("API key verified and saved!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Failed to verify API key: {str(e)}")
+        # AI API Status Section
+        st.subheader("AI API Status")
+        if AVAILABLE_MODULES['ai_api']:
+            st.success("✅ Connected to OpenAI API (GPT-4o)")
+            
+            # Show a mini usage tracker
+            if 'ai_api_calls' not in st.session_state:
+                st.session_state.ai_api_calls = 0
+            
+            st.metric("AI API Calls", st.session_state.ai_api_calls)
+        else:
+            st.error("❌ OpenAI API not configured")
+            st.info("Add OPENAI_API_KEY to your Streamlit secrets.toml file")
     
     # Main content tabs
-    tabs = st.tabs(["Import", "Analyze", "Results", "AI Insights", "Help"])
+    tabs = st.tabs(["Import", "Analyze", "Listing Optimization", "AI Insights", "Help"])
     
     with tabs[0]:
         render_file_upload()
@@ -418,7 +470,7 @@ def main():
         render_product_selection()
     
     with tabs[2]:
-        render_analysis_results()
+        render_listing_optimization()
     
     with tabs[3]:
         render_ai_insights()
@@ -430,7 +482,7 @@ def render_file_upload():
     """Render the file upload section."""
     st.header("Import Data")
     
-    upload_tabs = st.tabs(["Structured Data Import", "Manual Entry", "Document Import", "Historical Data"])
+    upload_tabs = st.tabs(["Structured Data Import", "Manual Entry", "Image/Review Import", "Historical Data"])
     
     # Tab 1: Structured Data Import
     with upload_tabs[0]:
@@ -452,7 +504,7 @@ def render_file_upload():
             st.download_button(
                 label="Download Sample Template",
                 data=sample_template,
-                file_name="medical_device_analysis_template.xlsx",
+                file_name="amazon_listing_optimization_template.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         
@@ -488,6 +540,10 @@ def render_file_upload():
                         st.session_state.uploaded_files['structured_data'] = df
                         st.success(f"Successfully processed file with {len(df)} products.")
                         st.dataframe(df.head())
+                        
+                        # Automatically run AI analysis if API is available
+                        if AVAILABLE_MODULES['ai_api'] and st.checkbox("Automatically run AI analysis on imported data", value=True):
+                            st.info("AI analysis will be run when you select a product in the Analyze tab")
                     except Exception as e:
                         st.error(f"Error processing file: {str(e)}")
                 else:
@@ -496,7 +552,7 @@ def render_file_upload():
     # Tab 2: Manual Entry
     with upload_tabs[1]:
         st.markdown("""
-        Manually enter product details for analysis. This is useful for analyzing a single product
+        Manually enter product details for analysis. Great for analyzing a single Amazon listing
         without needing to upload a spreadsheet.
         
         **Required fields are marked with an asterisk (*)**
@@ -520,28 +576,16 @@ def render_file_upload():
                     help="Required field"
                 )
             
-            # Additional Medical Device Info
-            st.subheader("Medical Device Information")
-            col1, col2 = st.columns(2)
+            # Amazon Listing Information
+            st.subheader("Amazon Listing Information")
             
-            with col1:
-                device_class = st.selectbox(
-                    "FDA Device Class (if known)",
-                    options=["Unknown", "Class I", "Class II", "Class III"],
-                    help="FDA classification for regulatory requirements"
-                )
-                prescription = st.selectbox(
-                    "Prescription Status",
-                    options=["OTC (Over-the-counter)", "Rx (Prescription)", "Unknown"],
-                    help="Whether the device requires a prescription"
-                )
+            product_description = st.text_area(
+                "Product Description/Bullet Points",
+                help="Copy and paste your Amazon listing content for AI analysis",
+                height=150
+            )
             
-            with col2:
-                product_description = st.text_area(
-                    "Product Description",
-                    help="Brief description of the product for better AI analysis",
-                    height=100
-                )
+            listing_url = st.text_input("Amazon Listing URL", help="Optional - for reference only")
             
             # Sales & Returns Section
             st.subheader("Sales & Returns Data")
@@ -566,7 +610,7 @@ def render_file_upload():
                 total_reviews = st.number_input("Total Reviews", min_value=0, help="Optional")
             
             # Manual Reviews & Return Reasons (optional)
-            st.subheader("Manual Reviews & Return Reasons (Optional)")
+            st.subheader("Customer Reviews & Return Reasons (Optional)")
             
             # Reviews input
             st.text_area(
@@ -582,6 +626,15 @@ def render_file_upload():
                 height=150,
                 key="manual_returns",
                 help="Optional: Enter return reasons one per line"
+            )
+            
+            # Competitive positioning
+            st.subheader("Competitive Positioning (Optional)")
+            st.text_area(
+                "Top Competing Products (One per line, format: ASIN - Product Name)",
+                height=100,
+                key="competing_products",
+                help="Optional: Enter competing products one per line"
             )
             
             # Submit button
@@ -600,9 +653,8 @@ def render_file_upload():
                         "SKU": [sku],
                         "Product Name": [product_name],
                         "Category": [category],
-                        "FDA Device Class": [device_class],
-                        "Prescription Status": [prescription],
                         "Product Description": [product_description],
+                        "Listing URL": [listing_url],
                         "Last 30 Days Sales": [sales_30d],
                         "Last 30 Days Returns": [returns_30d],
                         "Last 365 Days Sales": [sales_365d],
@@ -676,6 +728,30 @@ def render_file_upload():
                                 ]
                                 st.success(f"Saved {len(return_reasons)} return reasons for {asin}")
                         
+                        # Process competing products if provided
+                        competing_products = st.session_state.get("competing_products", "")
+                        if competing_products:
+                            competitors = []
+                            for line in competing_products.strip().split('\n'):
+                                if ' - ' in line:
+                                    try:
+                                        comp_asin, comp_name = line.split(' - ', 1)
+                                        competitors.append({
+                                            "asin": comp_asin.strip(),
+                                            "name": comp_name.strip(),
+                                            "product_asin": asin
+                                        })
+                                    except:
+                                        pass  # Skip invalid lines
+                            
+                            if competitors:
+                                # Store competitors
+                                if 'competitors' not in st.session_state.uploaded_files:
+                                    st.session_state.uploaded_files['competitors'] = {}
+                                
+                                st.session_state.uploaded_files['competitors'][asin] = competitors
+                                st.success(f"Saved {len(competitors)} competing products for {asin}")
+                        
                         # Display the entered data
                         st.subheader("Entered Product Data")
                         st.dataframe(df)
@@ -684,22 +760,29 @@ def render_file_upload():
                 except Exception as e:
                     st.error(f"Error processing manual entry: {str(e)}")
     
-    # Tab 3: Document Import
+    # Tab 3: Image/Review Import
     with upload_tabs[2]:
         st.markdown("""
-        Upload PDFs, images of reviews, return reports, or screenshots. 
-        The system will use OCR to extract data when possible.
+        Upload screenshots of Amazon reviews, listings, return reports, or product images. 
+        The system will extract text and analyze the content.
         """)
         
         if not AVAILABLE_MODULES['ocr']:
             st.warning("OCR processing is not available. To enable this feature, install pytesseract and pdf2image.")
         
         doc_files = st.file_uploader(
-            "Upload documents (PDF, Images)",
+            "Upload screenshots or images (PDF, PNG, JPG)",
             type=["pdf", "png", "jpg", "jpeg"],
             accept_multiple_files=True,
             key="documents",
             disabled=not AVAILABLE_MODULES['ocr']
+        )
+        
+        # Add option to specify what type of content is being uploaded
+        image_content_type = st.selectbox(
+            "What content are you uploading?",
+            options=["Product Reviews", "Product Listing", "Return Reports", "Product Images", "Competitor Listings", "Mixed Content"],
+            index=0
         )
         
         if doc_files and HAS_LOCAL_MODULES and AVAILABLE_MODULES['ocr']:
@@ -721,7 +804,8 @@ def render_file_upload():
                     processed_docs.append({
                         "filename": doc.name,
                         "text": text,
-                        "type": file_ext
+                        "type": file_ext,
+                        "content_type": image_content_type
                     })
             
             if processed_docs:
@@ -731,14 +815,39 @@ def render_file_upload():
                 if len(processed_docs) > 0:
                     with st.expander("Preview of extracted text"):
                         st.text(processed_docs[0]["text"][:1000] + "...")
+                        
+                    # Run AI analysis on the extracted text if enabled
+                    if AVAILABLE_MODULES['ai_api'] and st.button("Analyze Extracted Content with AI"):
+                        with st.spinner("Analyzing content with AI..."):
+                            analysis_type = ""
+                            if image_content_type == "Product Reviews":
+                                analysis_type = "sentiment"
+                            elif image_content_type in ["Product Listing", "Competitor Listings"]:
+                                analysis_type = "listing_optimization"
+                            elif image_content_type == "Return Reports":
+                                analysis_type = "return_analysis"
+                            elif image_content_type == "Product Images":
+                                analysis_type = "image_feedback"
+                            
+                            if analysis_type:
+                                # Increment the API call counter
+                                if 'ai_api_calls' in st.session_state:
+                                    st.session_state.ai_api_calls += 1
+                                
+                                result = analyze_with_ai(processed_docs[0]["text"], analysis_type)
+                                if result["success"]:
+                                    st.subheader("AI Analysis Results")
+                                    st.markdown(result["result"])
+                                else:
+                                    st.error(f"AI analysis failed: {result.get('error', 'Unknown error')}")
         elif doc_files and not (HAS_LOCAL_MODULES and AVAILABLE_MODULES['ocr']):
             st.error("OCR processing is not available. Document processing is skipped.")
     
     # Tab 4: Historical Data
     with upload_tabs[3]:
         st.markdown("""
-        Upload historical data for trend analysis (optional).
-        Use the same format as the structured data import.
+        Upload historical sales and return data (optional).
+        This helps identify trends and seasonality in your Amazon product performance.
         """)
         
         hist_file = st.file_uploader(
@@ -764,6 +873,28 @@ def render_file_upload():
                     st.session_state.uploaded_files['historical_data'] = hist_df
                     st.success(f"Successfully processed historical data with {len(hist_df)} entries.")
                     st.dataframe(hist_df.head())
+                    
+                    # Automatically generate trend visualization if dates are present
+                    if 'Date' in hist_df.columns and AVAILABLE_MODULES['plotly']:
+                        try:
+                            # Convert to datetime if not already
+                            hist_df['Date'] = pd.to_datetime(hist_df['Date'])
+                            
+                            # Check if we have sales or return data
+                            plot_cols = []
+                            if 'Sales' in hist_df.columns:
+                                plot_cols.append('Sales')
+                            if 'Returns' in hist_df.columns:
+                                plot_cols.append('Returns')
+                            if 'Return Rate' in hist_df.columns:
+                                plot_cols.append('Return Rate')
+                                
+                            if plot_cols:
+                                st.subheader("Historical Trends")
+                                fig = px.line(hist_df, x='Date', y=plot_cols, title="Historical Performance")
+                                st.plotly_chart(fig, use_container_width=True)
+                        except Exception as e:
+                            st.error(f"Error creating trend visualization: {str(e)}")
                 except Exception as e:
                     st.error(f"Error processing historical data: {str(e)}")
         elif hist_file and not AVAILABLE_MODULES['pandas']:
@@ -807,9 +938,8 @@ def render_product_selection():
         'sku': product_row['SKU'] if 'SKU' in product_row else "N/A",
         'name': product_row['Product Name'] if 'Product Name' in product_row else f"Product {product_row['ASIN']}",
         'category': product_row['Category'] if 'Category' in product_row else "Medical Device",
-        'device_class': product_row['FDA Device Class'] if 'FDA Device Class' in product_row else "Unknown",
-        'prescription': product_row['Prescription Status'] if 'Prescription Status' in product_row else "Unknown",
         'description': product_row['Product Description'] if 'Product Description' in product_row else "",
+        'listing_url': product_row['Listing URL'] if 'Listing URL' in product_row else "",
         'star_rating': product_row['Star Rating'] if 'Star Rating' in product_row else None,
         'total_reviews': product_row['Total Reviews'] if 'Total Reviews' in product_row else None,
         'sales_30d': product_row['Last 30 Days Sales'],
@@ -827,21 +957,34 @@ def render_product_selection():
     # Store selected product in session state
     st.session_state.current_product = product_info
     
+    # Calculate additional e-commerce metrics
+    monthly_revenue = product_info['sales_30d'] * 50  # Assuming average selling price of $50
+    transaction_fee = monthly_revenue * 0.15  # Assuming 15% Amazon fee
+    cost_of_returns = product_info['returns_30d'] * 15  # Assuming $15 cost per return processing
+    
     # Display selected product info in metrics
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("30-Day Sales", f"{product_info['sales_30d']:,}")
+        st.metric("Est. Monthly Revenue", f"${monthly_revenue:,.2f}")
     with col2:
         st.metric("30-Day Returns", f"{product_info['returns_30d']:,}")
+        st.metric("Return Processing Cost", f"${cost_of_returns:,.2f}")
     with col3:
         st.metric("30-Day Return Rate", f"{product_info['return_rate_30d']:.2f}%")
+        st.metric("Amazon Fees (Est.)", f"${transaction_fee:,.2f}")
     with col4:
         if product_info['star_rating'] is not None:
             st.metric("Star Rating", f"{product_info['star_rating']:.1f} ★")
+            # Calculate rating improvement impact
+            potential_impact = 0
+            if product_info['star_rating'] < 4.5:
+                potential_impact = ((4.5 - product_info['star_rating']) / product_info['star_rating']) * monthly_revenue * 0.10
+                st.metric("Rating Improvement Value", f"${potential_impact:,.2f}")
     
-    # Display FDA device class if available
-    if product_info['device_class'] != "Unknown":
-        st.info(f"FDA Classification: {product_info['device_class']} - {FDA_DEVICE_CLASSES.get(product_info['device_class'], '')}")
+    # Display listing URL if available
+    if product_info['listing_url']:
+        st.markdown(f"[View Amazon Listing]({product_info['listing_url']})")
     
     # Get review data for the selected product from documents if available
     reviews_data = []
@@ -851,11 +994,12 @@ def render_product_selection():
         docs = st.session_state.uploaded_files['documents']
         
         for doc in docs:
-            # Extract reviews from OCR text
-            text = doc["text"]
-            extracted_reviews = ocr_processor.extract_amazon_reviews_data(text)
-            if "reviews" in extracted_reviews:
-                reviews_data.extend(extracted_reviews["reviews"])
+            # Extract reviews from OCR text if content type is reviews
+            if doc.get("content_type") == "Product Reviews":
+                text = doc["text"]
+                extracted_reviews = ocr_processor.extract_amazon_reviews_data(text)
+                if "reviews" in extracted_reviews:
+                    reviews_data.extend(extracted_reviews["reviews"])
     
     # 2. Check for manually entered reviews
     if 'manual_reviews' in st.session_state.uploaded_files:
@@ -878,6 +1022,16 @@ def render_product_selection():
     if return_reasons_data:
         st.write(f"Found {len(return_reasons_data)} return reasons for this product.")
     
+    # Get competitors data if available
+    competitors_data = []
+    if 'competitors' in st.session_state.uploaded_files:
+        competitors = st.session_state.uploaded_files['competitors']
+        if product_info['asin'] in competitors:
+            competitors_data.extend(competitors[product_info['asin']])
+            
+    if competitors_data:
+        st.write(f"Found {len(competitors_data)} competing products for comparison.")
+    
     # Get historical data for the selected product if available
     historical_data = None
     if 'historical_data' in st.session_state.uploaded_files:
@@ -888,22 +1042,6 @@ def render_product_selection():
             if len(hist_filtered) > 0:
                 historical_data = hist_filtered
                 st.write(f"Found {len(historical_data)} historical data points for this product.")
-    
-    # AI Device Classification
-    if AVAILABLE_MODULES['ai_api'] and product_info['device_class'] == "Unknown":
-        if st.button("Use AI to Classify Device"):
-            with st.spinner("Classifying medical device..."):
-                classification = classify_medical_device(
-                    product_info['name'],
-                    product_info['category'],
-                    product_info['description']
-                )
-                
-                if classification["success"]:
-                    st.info("AI Device Classification Result:")
-                    st.markdown(classification["result"])
-                else:
-                    st.error(f"Classification failed: {classification['error']}")
     
     # Run analysis button
     analysis_col1, analysis_col2 = st.columns(2)
@@ -936,7 +1074,8 @@ def render_product_selection():
                                 'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                 'reviews_data': reviews_data if reviews_data else [],
                                 'return_reasons_data': return_reasons_data if return_reasons_data else [],
-                                'historical_data': historical_data
+                                'historical_data': historical_data,
+                                'competitors_data': competitors_data if competitors_data else []
                             }
                         else:
                             # Basic analysis without local modules
@@ -951,7 +1090,8 @@ def render_product_selection():
                                 'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                 'reviews_data': reviews_data if reviews_data else [],
                                 'return_reasons_data': return_reasons_data if return_reasons_data else [],
-                                'historical_data': historical_data
+                                'historical_data': historical_data,
+                                'competitors_data': competitors_data if competitors_data else []
                             }
                         
                         st.success("Analysis complete!")
@@ -967,6 +1107,10 @@ def render_product_selection():
                 if st.session_state.current_product:
                     with st.spinner("Performing AI-enhanced analysis..."):
                         try:
+                            # Increment the API call counter
+                            if 'ai_api_calls' in st.session_state:
+                                st.session_state.ai_api_calls += 1
+                                
                             # First run standard analysis if not already done
                             if product_info['asin'] not in st.session_state.analysis_results:
                                 analysis_result = f"Analysis for {product_info['name']} ({product_info['asin']})\n\n"
@@ -988,7 +1132,8 @@ def render_product_selection():
                                     'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                     'reviews_data': reviews_data if reviews_data else [],
                                     'return_reasons_data': return_reasons_data if return_reasons_data else [],
-                                    'historical_data': historical_data
+                                    'historical_data': historical_data,
+                                    'competitors_data': competitors_data if competitors_data else []
                                 }
                             
                             # Now run AI analysis
@@ -1002,18 +1147,12 @@ def render_product_selection():
                                     if review_text:
                                         # Analyze sentiment
                                         sentiment = analyze_with_ai(review_text, 'sentiment')
-                                        # Analyze medical concerns
-                                        medical_concerns = analyze_with_ai(review_text, 'medical_concerns')
-                                        # Analyze compliance issues
-                                        compliance = analyze_with_ai(review_text, 'compliance_issues')
-                                        
-                                        review_insights.append({
-                                            'review': review_text,
-                                            'rating': review.get('rating', 'N/A'),
-                                            'sentiment_analysis': sentiment.get('result', 'Analysis failed') if sentiment.get('success', False) else 'Analysis failed',
-                                            'medical_concerns': medical_concerns.get('result', 'Analysis failed') if medical_concerns.get('success', False) else 'Analysis failed',
-                                            'compliance_issues': compliance.get('result', 'Analysis failed') if compliance.get('success', False) else 'Analysis failed'
-                                        })
+                                        if sentiment.get('success', False):
+                                            review_insights.append({
+                                                'review': review_text,
+                                                'rating': review.get('rating', 'N/A'),
+                                                'analysis': sentiment.get('result', 'Analysis failed')
+                                            })
                                 
                                 ai_insights['review_insights'] = review_insights
                             
@@ -1024,14 +1163,20 @@ def render_product_selection():
                                     return_reason = return_data.get('return_reason', '')
                                     if return_reason:
                                         analysis = analyze_with_ai(return_reason, 'return_analysis')
-                                        return_insights.append({
-                                            'return_reason': return_reason,
-                                            'analysis': analysis.get('result', 'Analysis failed') if analysis.get('success', False) else 'Analysis failed'
-                                        })
+                                        if analysis.get('success', False):
+                                            return_insights.append({
+                                                'return_reason': return_reason,
+                                                'analysis': analysis.get('result', 'Analysis failed')
+                                            })
                                 
                                 ai_insights['return_insights'] = return_insights
                             
-                            # 3. Generate improvement recommendations
+                            # 3. Generate listing optimization recommendations
+                            listing_optimization = analyze_listing_optimization(product_info)
+                            if listing_optimization.get('success', False):
+                                ai_insights['listing_optimization'] = listing_optimization.get('result', 'Analysis failed')
+                            
+                            # 4. Generate improvement recommendations
                             if reviews_data or return_reasons_data:
                                 recommendations = generate_improvement_recommendations(
                                     product_info,
@@ -1055,236 +1200,888 @@ def render_product_selection():
                 else:
                     st.error("Please select a product to analyze.")
         else:
-            st.warning("AI-Enhanced Analysis requires OpenAI API key")
+            st.warning("AI-Enhanced Analysis requires OpenAI API key in Streamlit secrets")
 
-def render_analysis_results():
-    """Render the analysis results section."""
-    st.header("Analysis Results")
+def render_listing_optimization():
+    """Render the listing optimization section."""
+    st.header("Amazon Listing Optimization")
     
-    # Check if we have results to display
-    if not st.session_state.analysis_results:
-        st.info("No analysis results available. Please select and analyze a product.")
+    # Check if we have a current product selected
+    if not st.session_state.current_product:
+        st.info("Please select a product in the Analyze tab first.")
         return
     
-    # If we have a current product selected, display its results
-    if st.session_state.current_product:
-        product_asin = st.session_state.current_product['asin']
+    product_info = st.session_state.current_product
+    
+    st.subheader(f"Optimize Listing for {product_info['name']} ({product_info['asin']})")
+    
+    # Check if AI is available
+    if not AVAILABLE_MODULES['ai_api']:
+        st.warning("OpenAI API is required for listing optimization. Please add your API key to Streamlit secrets.")
+        return
+    
+    # Tabs for different optimization areas
+    tabs = st.tabs(["Current Listing", "Title Optimization", "Bullet Points", "Description", "Keywords", "Images", "Competitive Analysis"])
+    
+    # Tab 1: Current Listing
+    with tabs[0]:
+        st.markdown("### Current Amazon Listing")
         
-        if product_asin in st.session_state.analysis_results:
-            result = st.session_state.analysis_results[product_asin]
-            product_info = result['product_info']
-            analysis = result['analysis']
-            
-            # Display info
-            st.subheader(f"Analysis for {product_info['name']} ({product_info['asin']})")
-            st.caption(f"Analyzed on: {result['timestamp']}")
-            
-            # Create tabs for different sections of the analysis
-            tabs = st.tabs(["Summary", "Detailed Analysis", "Visualizations", "Export"])
-            
-            # Tab 1: Summary
-            with tabs[0]:
-                # Display regulatory information
-                if product_info.get('device_class', 'Unknown') != 'Unknown':
-                    st.info(f"FDA Classification: {product_info['device_class']} - {FDA_DEVICE_CLASSES.get(product_info['device_class'], '')}")
-                
-                st.markdown(analysis)
-                
-                # Show return rate benchmarks
-                if product_info.get('return_rate_30d') is not None:
-                    st.subheader("Return Rate Assessment")
-                    
-                    # Define benchmark ranges for medical devices
-                    if product_info['return_rate_30d'] < 2.0:
-                        st.success(f"Return rate ({product_info['return_rate_30d']:.2f}%) is excellent - well below industry average for medical devices")
-                    elif product_info['return_rate_30d'] < 5.0:
-                        st.info(f"Return rate ({product_info['return_rate_30d']:.2f}%) is good - near industry average for medical devices")
-                    elif product_info['return_rate_30d'] < 10.0:
-                        st.warning(f"Return rate ({product_info['return_rate_30d']:.2f}%) is elevated - above industry average for medical devices")
-                    else:
-                        st.error(f"Return rate ({product_info['return_rate_30d']:.2f}%) is high - significantly above industry average for medical devices")
-            
-            # Tab 2: Detailed Analysis
-            with tabs[1]:
-                if 'reviews_data' in result and result['reviews_data'] and HAS_LOCAL_MODULES:
-                    review_analysis = data_analysis.analyze_reviews(result['reviews_data'])
-                    
-                    st.subheader("Review Analysis")
-                    st.write(f"Total Reviews: {review_analysis['total_reviews']}")
-                    
-                    if review_analysis['average_rating']:
-                        st.write(f"Average Rating: {review_analysis['average_rating']:.1f}")
-                    
-                    # Display sentiment breakdown
-                    if review_analysis.get('sentiment'):
-                        st.subheader("Sentiment Breakdown")
-                        sentiment = review_analysis['sentiment']
-                        
-                        # Create columns for sentiment display
-                        sent_col1, sent_col2, sent_col3 = st.columns(3)
-                        with sent_col1:
-                            st.metric("Positive", f"{sentiment.get('positive', 0)}")
-                        with sent_col2:
-                            st.metric("Neutral", f"{sentiment.get('neutral', 0)}")
-                        with sent_col3:
-                            st.metric("Negative", f"{sentiment.get('negative', 0)}")
-                    
-                    # Display common topics
-                    if review_analysis.get('common_topics'):
-                        st.subheader("Common Topics")
-                        topics = sorted(review_analysis['common_topics'].items(), key=lambda x: x[1], reverse=True)
-                        
-                        # Medical device specific topics to highlight
-                        med_device_concerns = ['pain', 'comfort', 'effective', 'quality', 'safety', 
-                                              'adjustable', 'stability', 'support', 'instructions',
-                                              'durable', 'easy', 'fit', 'size', 'material']
-                        
-                        for topic, count in topics[:10]:  # Top 10 topics
-                            if any(concern in topic.lower() for concern in med_device_concerns):
-                                st.warning(f"{topic}: {count} mentions - Medical Device Key Factor")
-                            else:
-                                st.write(f"{topic}: {count} mentions")
-                    
-                    # Display return reasons if available
-                    if 'return_reasons_data' in result and result['return_reasons_data']:
-                        st.subheader("Return Reasons")
-                        return_reasons = [item.get('return_reason', '') for item in result['return_reasons_data']]
-                        unique_reasons = {}
-                        for reason in return_reasons:
-                            if reason in unique_reasons:
-                                unique_reasons[reason] += 1
-                            else:
-                                unique_reasons[reason] = 1
-                        
-                        # Medical device specific return reasons to highlight
-                        med_device_returns = ['defective', 'broke', 'quality', 'safety', 'malfunction', 
-                                             'uncomfortable', 'difficult', 'pain', 'damaged', 'wrong size']
-                        
-                        for reason, count in sorted(unique_reasons.items(), key=lambda x: x[1], reverse=True):
-                            if any(r_word in reason.lower() for r_word in med_device_returns):
-                                st.error(f"{reason}: {count} - Potential Quality Issue")
-                            else:
-                                st.write(f"{reason}: {count}")
-                else:
-                    st.write("No detailed analysis available for this product.")
-            
-            # Tab 3: Visualizations
-            with tabs[2]:
-                if 'reviews_data' in result and result['reviews_data'] and HAS_LOCAL_MODULES and AVAILABLE_MODULES['plotly']:
-                    review_analysis = data_analysis.analyze_reviews(result['reviews_data'])
-                    
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        # Sentiment chart
-                        sentiment_chart = data_analysis.create_sentiment_chart(review_analysis)
-                        if sentiment_chart:
-                            st.plotly_chart(sentiment_chart, use_container_width=True)
-                    
-                    with col2:
-                        # Rating distribution chart
-                        rating_chart = data_analysis.create_rating_distribution_chart(review_analysis)
-                        if rating_chart:
-                            st.plotly_chart(rating_chart, use_container_width=True)
-                    
-                    # Topics chart
-                    topics_chart = data_analysis.create_topics_chart(review_analysis)
-                    if topics_chart:
-                        st.plotly_chart(topics_chart, use_container_width=True)
-                    
-                    # Return reasons chart if available
-                    if 'return_reasons_data' in result and result['return_reasons_data'] and len(result['return_reasons_data']) > 0:
-                        return_reasons = [item.get('return_reason', '') for item in result['return_reasons_data']]
-                        reason_counts = {}
-                        for reason in return_reasons:
-                            if reason in reason_counts:
-                                reason_counts[reason] += 1
-                            else:
-                                reason_counts[reason] = 1
-                        
-                        fig = px.pie(
-                            values=list(reason_counts.values()),
-                            names=list(reason_counts.keys()),
-                            title="Return Reasons",
-                            hole=0.4
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-                    
-                    # Display historical trend if available
-                    if 'historical_data' in result and result['historical_data'] is not None:
-                        hist_data = result['historical_data']
-                        if 'Date' in hist_data.columns and 'Return Rate' in hist_data.columns:
-                            st.subheader("Historical Return Rate Trend")
-                            fig = px.line(
-                                hist_data, 
-                                x='Date', 
-                                y='Return Rate',
-                                title="Return Rate Over Time",
-                                markers=True
-                            )
-                            st.plotly_chart(fig, use_container_width=True)
-                else:
-                    if not AVAILABLE_MODULES['plotly']:
-                        st.warning("Plotly is not available. Visualizations cannot be displayed.")
-                    elif not ('reviews_data' in result and result['reviews_data']):
-                        st.warning("No review data available for visualization.")
-                    else:
-                        st.warning("Dependencies for visualization are not available.")
-            
-            # Tab 4: Export
-            with tabs[3]:
-                st.subheader("Export Analysis")
-                
-                # Export as text
-                st.download_button(
-                    label="Export as Text",
-                    data=analysis,
-                    file_name=f"{product_info['asin']}_analysis.txt",
-                    mime="text/plain"
-                )
-                
-                # Export to Excel (if xlsxwriter available)
-                if HAS_LOCAL_MODULES and AVAILABLE_MODULES['xlsx_writer'] and AVAILABLE_MODULES['pandas']:
-                    # Create structured data for export
-                    if 'reviews_data' in result and result['reviews_data']:
-                        review_analysis = data_analysis.analyze_reviews(result['reviews_data'])
-                        
-                        export_data = data_analysis.generate_report_data(
-                            product_info, 
-                            {"total_returns": product_info['returns_30d']}, 
-                            review_analysis
-                        )
-                        
-                        excel_data = data_analysis.create_excel_report(export_data)
-                        
-                        st.download_button(
-                            label="Export as Excel Report",
-                            data=excel_data,
-                            file_name=f"{product_info['asin']}_analysis.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        )
-                else:
-                    st.warning("Excel export requires xlsxwriter and pandas. These modules are not available.")
+        # Display current listing info if available
+        if product_info['description']:
+            st.markdown("#### Product Description")
+            st.text_area("Current Description", value=product_info['description'], height=300, disabled=True)
         else:
-            st.warning(f"No analysis results available for {st.session_state.current_product['name']}. Please run analysis first.")
-    else:
-        # If no current product, let the user select from available analyses
-        available_analyses = list(st.session_state.analysis_results.keys())
-        if available_analyses:
-            selected_asin = st.selectbox("Select a previously analyzed product:", available_analyses)
-            if st.button("Show Analysis"):
-                # Set the selected product as current
-                st.session_state.current_product = st.session_state.analysis_results[selected_asin]['product_info']
+            st.warning("No product description available. Add one in the Manual Entry tab.")
+        
+        # Option to paste Amazon listing content if not already entered
+        if not product_info['description']:
+            with st.form("update_listing_form"):
+                description = st.text_area("Paste your Amazon listing content (title, bullets, description)", height=300)
+                submit = st.form_submit_button("Update Listing")
+                
+                if submit and description:
+                    # Update the product info in session state
+                    product_info['description'] = description
+                    st.session_state.current_product = product_info
+                    
+                    # Update in the structured data DataFrame as well
+                    if 'structured_data' in st.session_state.uploaded_files:
+                        df = st.session_state.uploaded_files['structured_data']
+                        df.loc[df['ASIN'] == product_info['asin'], 'Product Description'] = description
+                        st.session_state.uploaded_files['structured_data'] = df
+                    
+                    st.success("Listing content updated!")
+                    st.rerun()
+        
+        # Amazon listing score based on key metrics
+        st.markdown("### Listing Quality Score")
+        
+        # Calculate estimated listing quality score (placeholder logic)
+        scores = {}
+        if product_info['description']:
+            # Simple metrics based on description length and content
+            desc = product_info['description']
+            scores["Title Effectiveness"] = min(len(desc.split('\n')[0].split()) * 5, 100) if '\n' in desc else 60
+            scores["Bullet Points"] = min(desc.count('\n') * 10, 100) if desc.count('\n') > 0 else 40
+            scores["Description Quality"] = min(len(desc) / 20, 100)
+            scores["Image Quality"] = 75  # Placeholder
+            scores["Keywords Coverage"] = 65  # Placeholder
+            scores["Q&A Completeness"] = 50  # Placeholder
+            scores["Review Response"] = 40  # Placeholder
+            
+            # Get star rating impact
+            if product_info['star_rating']:
+                scores["Customer Satisfaction"] = min(product_info['star_rating'] * 20, 100)
+            
+            # Get return rate impact
+            if product_info['return_rate_30d'] is not None:
+                scores["Return Rate"] = max(100 - (product_info['return_rate_30d'] * 5), 0)
+        else:
+            # Default scores if no description
+            for metric in LISTING_METRICS:
+                scores[metric] = 50
+        
+        # Display listing quality score with gauge chart
+        if AVAILABLE_MODULES['plotly']:
+            # Calculate overall score
+            overall_score = sum(scores.values()) / len(scores)
+            
+            # Create gauge chart for overall score
+            fig = go.Figure(go.Indicator(
+                mode = "gauge+number",
+                value = overall_score,
+                domain = {'x': [0, 1], 'y': [0, 1]},
+                title = {'text': "Overall Listing Quality"},
+                gauge = {
+                    'axis': {'range': [0, 100]},
+                    'bar': {'color': "royalblue"},
+                    'steps': [
+                        {'range': [0, 40], 'color': "lightcoral"},
+                        {'range': [40, 70], 'color': "khaki"},
+                        {'range': [70, 100], 'color': "lightgreen"}
+                    ],
+                    'threshold': {
+                        'line': {'color': "black", 'width': 4},
+                        'thickness': 0.75,
+                        'value': 80
+                    }
+                }
+            ))
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Display individual metric scores
+            st.markdown("### Listing Metrics")
+            
+            # Create a dataframe for the metrics
+            metric_df = pd.DataFrame({
+                'Metric': list(scores.keys()),
+                'Score': list(scores.values()),
+                'Description': [LISTING_METRICS.get(m, "") for m in scores.keys()]
+            })
+            
+            # Create a bar chart
+            fig = px.bar(
+                metric_df, 
+                x='Metric', 
+                y='Score', 
+                color='Score',
+                color_continuous_scale=["red", "yellow", "green"],
+                range_color=[0, 100],
+                hover_data=['Description'],
+                title="Listing Quality Metrics"
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # AI analysis button
+        if st.button("Generate AI Optimization Recommendations", type="primary"):
+            with st.spinner("Analyzing listing with AI..."):
+                # Increment the API call counter
+                if 'ai_api_calls' in st.session_state:
+                    st.session_state.ai_api_calls += 1
+                
+                listing_optimization = analyze_listing_optimization(product_info)
+                if listing_optimization.get('success', False):
+                    # Store in AI insights
+                    if product_info['asin'] not in st.session_state.ai_insights:
+                        st.session_state.ai_insights[product_info['asin']] = {
+                            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            'insights': {}
+                        }
+                    
+                    st.session_state.ai_insights[product_info['asin']]['insights']['listing_optimization'] = listing_optimization.get('result')
+                    
+                    st.success("Listing optimization recommendations generated!")
+                    st.markdown("### AI Recommendations")
+                    st.markdown(listing_optimization.get('result'))
+                else:
+                    st.error(f"AI analysis failed: {listing_optimization.get('error', 'Unknown error')}")
+    
+    # Tab 2: Title Optimization
+    with tabs[1]:
+        st.markdown("### Amazon Title Optimization")
+        st.markdown("""
+        A great Amazon title should:
+        - Include main keywords
+        - Be within 200 characters
+        - List key benefits
+        - Include brand name
+        - Mention the specific model/type
+        """)
+        
+        # Extract current title
+        current_title = ""
+        if product_info['description']:
+            lines = product_info['description'].split('\n')
+            if lines:
+                current_title = lines[0]
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### Current Title")
+            st.text_area("Current", value=current_title, height=100, disabled=True)
+            
+            # Title length analysis
+            if current_title:
+                title_length = len(current_title)
+                if title_length < 80:
+                    st.warning(f"Title length: {title_length}/200 characters - Consider adding more relevant keywords")
+                elif title_length > 180:
+                    st.warning(f"Title length: {title_length}/200 characters - Getting close to the limit")
+                else:
+                    st.success(f"Title length: {title_length}/200 characters - Good length")
+        
+        with col2:
+            st.markdown("#### Optimized Title")
+            
+            # Get AI recommendations for title if available
+            if product_info['asin'] in st.session_state.ai_insights and 'listing_optimization' in st.session_state.ai_insights[product_info['asin']]['insights']:
+                listing_insights = st.session_state.ai_insights[product_info['asin']]['insights']['listing_optimization']
+                
+                # Try to extract title recommendations
+                title_section = ""
+                if "Title" in listing_insights and "recommendations" in listing_insights.lower():
+                    lines = listing_insights.split('\n')
+                    in_title_section = False
+                    for line in lines:
+                        if "Title" in line and ":" in line:
+                            in_title_section = True
+                            title_section += line + "\n"
+                        elif in_title_section and line.strip() and not any(section in line for section in ["Bullet", "Description", "Image", "Keyword"]):
+                            title_section += line + "\n"
+                        elif in_title_section and any(section in line for section in ["Bullet", "Description", "Image", "Keyword"]):
+                            in_title_section = False
+                
+                if title_section:
+                    st.markdown(title_section)
+                else:
+                    st.info("Generate full listing recommendations to see title optimization suggestions")
+            else:
+                st.info("Run AI Optimization to get title recommendations")
+        
+        # Generate title button
+        if st.button("Generate Optimized Title", key="title_button"):
+            with st.spinner("Generating optimized title..."):
+                # Increment the API call counter
+                if 'ai_api_calls' in st.session_state:
+                    st.session_state.ai_api_calls += 1
+                
+                prompt = f"""Create an optimized Amazon title for this medical device product:
+                
+                Product: {product_info['name']}
+                Category: {product_info['category']}
+                Current Title: {current_title}
+                
+                Follow Amazon's best practices:
+                - Maximum 200 characters
+                - Include key search terms
+                - Format: Brand + Model + Type + Key Features/Benefits
+                - No promotional language like "best" or "top-rated"
+                - No special characters beyond basic punctuation
+                
+                Provide just the optimized title text.
+                """
+                
+                messages = [
+                    {"role": "system", "content": "You are an expert Amazon listing optimization specialist for medical devices."},
+                    {"role": "user", "content": prompt}
+                ]
+                
+                try:
+                    # Check which version of the OpenAI SDK is being used
+                    if 'client' in globals():  # New SDK (v1.0.0+)
+                        response = client.chat.completions.create(
+                            model="gpt-4o",
+                            messages=messages,
+                            max_tokens=200,
+                            temperature=0.2
+                        )
+                        result = response.choices[0].message.content
+                    else:  # Legacy SDK (<v1.0.0)
+                        response = openai.ChatCompletion.create(
+                            model="gpt-4o",
+                            messages=messages,
+                            max_tokens=200,
+                            temperature=0.2
+                        )
+                        result = response.choices[0].message.content
+                    
+                    st.success("Optimized title generated!")
+                    st.markdown("### AI-Generated Title")
+                    st.markdown(result)
+                    
+                    # Display length analysis
+                    title_length = len(result)
+                    if title_length < 80:
+                        st.warning(f"Title length: {title_length}/200 characters - Consider adding more relevant keywords")
+                    elif title_length > 180:
+                        st.warning(f"Title length: {title_length}/200 characters - Getting close to the limit")
+                    else:
+                        st.success(f"Title length: {title_length}/200 characters - Good length")
+                except Exception as e:
+                    st.error(f"Error generating title: {str(e)}")
+    
+    # Tab 3: Bullet Points
+    with tabs[2]:
+        st.markdown("### Bullet Points Optimization")
+        st.markdown("""
+        Effective bullet points should:
+        - Focus on key benefits (not just features)
+        - Address customer pain points
+        - Be concise but descriptive
+        - Include relevant keywords
+        - Address common questions/concerns
+        """)
+        
+        # Extract current bullet points
+        bullet_points = []
+        if product_info['description']:
+            lines = product_info['description'].split('\n')
+            in_bullets = False
+            for line in lines:
+                if line.strip().startswith('•') or line.strip().startswith('-') or line.strip().startswith('*'):
+                    bullet_points.append(line.strip())
+                    in_bullets = True
+                elif in_bullets and line.strip() and not line.strip().startswith('•') and not line.strip().startswith('-') and not line.strip().startswith('*'):
+                    in_bullets = False
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### Current Bullet Points")
+            if bullet_points:
+                for bp in bullet_points:
+                    st.markdown(bp)
+            else:
+                st.info("No bullet points detected in the product description")
+        
+        with col2:
+            st.markdown("#### Optimized Bullet Points")
+            
+            # Get AI recommendations for bullet points if available
+            if product_info['asin'] in st.session_state.ai_insights and 'listing_optimization' in st.session_state.ai_insights[product_info['asin']]['insights']:
+                listing_insights = st.session_state.ai_insights[product_info['asin']]['insights']['listing_optimization']
+                
+                # Try to extract bullet point recommendations
+                bullet_section = ""
+                if "Bullet" in listing_insights:
+                    lines = listing_insights.split('\n')
+                    in_bullet_section = False
+                    for line in lines:
+                        if "Bullet" in line:
+                            in_bullet_section = True
+                            bullet_section += line + "\n"
+                        elif in_bullet_section and line.strip() and not any(section in line for section in ["Title", "Description", "Image", "Keyword"]):
+                            bullet_section += line + "\n"
+                        elif in_bullet_section and any(section in line for section in ["Title", "Description", "Image", "Keyword"]):
+                            in_bullet_section = False
+                
+                if bullet_section:
+                    st.markdown(bullet_section)
+                else:
+                    st.info("Generate full listing recommendations to see bullet point optimization suggestions")
+            else:
+                st.info("Run AI Optimization to get bullet point recommendations")
+        
+        # Generate bullet points button
+        if st.button("Generate Optimized Bullet Points", key="bullet_button"):
+            with st.spinner("Generating optimized bullet points..."):
+                # Increment the API call counter
+                if 'ai_api_calls' in st.session_state:
+                    st.session_state.ai_api_calls += 1
+                
+                prompt = f"""Create 5 optimized bullet points for this Amazon medical device listing:
+                
+                Product: {product_info['name']}
+                Category: {product_info['category']}
+                Description: {product_info['description']}
+                
+                Current Bullet Points:
+                {chr(10).join(bullet_points) if bullet_points else "None provided"}
+                
+                Follow Amazon's best practices:
+                - Focus on benefits, not just features
+                - Address customer pain points and questions
+                - Include relevant keywords
+                - Start with capital letters
+                - Keep each point under 200 characters
+                - Format as complete sentences
+                - No promotional language like "best" or "top-rated"
+                
+                Include one bullet point specifically addressing quality/durability and one addressing comfort/ease of use.
+                """
+                
+                messages = [
+                    {"role": "system", "content": "You are an expert Amazon listing optimization specialist for medical devices."},
+                    {"role": "user", "content": prompt}
+                ]
+                
+                try:
+                    # Check which version of the OpenAI SDK is being used
+                    if 'client' in globals():  # New SDK (v1.0.0+)
+                        response = client.chat.completions.create(
+                            model="gpt-4o",
+                            messages=messages,
+                            max_tokens=500,
+                            temperature=0.2
+                        )
+                        result = response.choices[0].message.content
+                    else:  # Legacy SDK (<v1.0.0)
+                        response = openai.ChatCompletion.create(
+                            model="gpt-4o",
+                            messages=messages,
+                            max_tokens=500,
+                            temperature=0.2
+                        )
+                        result = response.choices[0].message.content
+                    
+                    st.success("Optimized bullet points generated!")
+                    st.markdown("### AI-Generated Bullet Points")
+                    st.markdown(result)
+                except Exception as e:
+                    st.error(f"Error generating bullet points: {str(e)}")
+    
+    # Tab 4: Description
+    with tabs[3]:
+        st.markdown("### Product Description Optimization")
+        st.markdown("""
+        An effective Amazon product description should:
+        - Expand on features and benefits
+        - Use HTML formatting for readability
+        - Include keywords naturally
+        - Address customer objections
+        - Provide use cases and scenarios
+        """)
+        
+        # Extract current description (excluding title and bullets)
+        current_description = ""
+        if product_info['description']:
+            lines = product_info['description'].split('\n')
+            if len(lines) > 1:
+                # Skip the first line (title) and any bullet points
+                in_description = False
+                for line in lines[1:]:
+                    if not line.strip().startswith('•') and not line.strip().startswith('-') and not line.strip().startswith('*') and line.strip():
+                        in_description = True
+                        current_description += line + "\n"
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### Current Description")
+            st.text_area("Current Description", value=current_description, height=300, disabled=True)
+        
+        with col2:
+            st.markdown("#### Optimized Description")
+            
+            # Get AI recommendations for description if available
+            if product_info['asin'] in st.session_state.ai_insights and 'listing_optimization' in st.session_state.ai_insights[product_info['asin']]['insights']:
+                listing_insights = st.session_state.ai_insights[product_info['asin']]['insights']['listing_optimization']
+                
+                # Try to extract description recommendations
+                description_section = ""
+                if "Description" in listing_insights:
+                    lines = listing_insights.split('\n')
+                    in_description_section = False
+                    for line in lines:
+                        if "Description" in line:
+                            in_description_section = True
+                            description_section += line + "\n"
+                        elif in_description_section and line.strip() and not any(section in line for section in ["Title", "Bullet", "Image", "Keyword"]):
+                            description_section += line + "\n"
+                        elif in_description_section and any(section in line for section in ["Title", "Bullet", "Image", "Keyword"]):
+                            in_description_section = False
+                
+                if description_section:
+                    st.markdown(description_section)
+                else:
+                    st.info("Generate full listing recommendations to see description optimization suggestions")
+            else:
+                st.info("Run AI Optimization to get description recommendations")
+        
+        # Generate description button
+        if st.button("Generate Optimized Description", key="description_button"):
+            with st.spinner("Generating optimized description..."):
+                # Increment the API call counter
+                if 'ai_api_calls' in st.session_state:
+                    st.session_state.ai_api_calls += 1
+                
+                prompt = f"""Create an optimized Amazon product description for this medical device:
+                
+                Product: {product_info['name']}
+                Category: {product_info['category']}
+                Current Description: {current_description}
+                
+                Follow Amazon's best practices:
+                - Write in HTML format with paragraph tags (<p>) and line breaks
+                - Expand on features and benefits beyond the bullet points
+                - Include keywords naturally throughout the text
+                - Address potential customer questions and objections
+                - Describe specific use cases and scenarios
+                - Highlight quality, comfort, ease of use, and durability
+                - Avoid excessive capitalization and promotional language
+                
+                The description should be 3-5 paragraphs and include HTML formatting.
+                """
+                
+                messages = [
+                    {"role": "system", "content": "You are an expert Amazon listing optimization specialist for medical devices."},
+                    {"role": "user", "content": prompt}
+                ]
+                
+                try:
+                    # Check which version of the OpenAI SDK is being used
+                    if 'client' in globals():  # New SDK (v1.0.0+)
+                        response = client.chat.completions.create(
+                            model="gpt-4o",
+                            messages=messages,
+                            max_tokens=800,
+                            temperature=0.2
+                        )
+                        result = response.choices[0].message.content
+                    else:  # Legacy SDK (<v1.0.0)
+                        response = openai.ChatCompletion.create(
+                            model="gpt-4o",
+                            messages=messages,
+                            max_tokens=800,
+                            temperature=0.2
+                        )
+                        result = response.choices[0].message.content
+                    
+                    st.success("Optimized description generated!")
+                    st.markdown("### AI-Generated Description")
+                    st.code(result, language="html")
+                    
+                    # Display preview
+                    st.markdown("### Preview")
+                    st.markdown(result, unsafe_allow_html=True)
+                except Exception as e:
+                    st.error(f"Error generating description: {str(e)}")
+    
+    # Tab 5: Keywords
+    with tabs[4]:
+        st.markdown("### Keyword Optimization")
+        st.markdown("""
+        Effective Amazon keywords strategy:
+        - Include relevant search terms customers use
+        - Focus on long-tail keywords for medical devices
+        - Include synonyms and related terms
+        - Add appropriate medical terminology
+        - Consider customer language (not just technical terms)
+        """)
+        
+        # Get AI recommendations for keywords if available
+        if product_info['asin'] in st.session_state.ai_insights and 'listing_optimization' in st.session_state.ai_insights[product_info['asin']]['insights']:
+            listing_insights = st.session_state.ai_insights[product_info['asin']]['insights']['listing_optimization']
+            
+            # Try to extract keyword recommendations
+            keyword_section = ""
+            if "Keyword" in listing_insights:
+                lines = listing_insights.split('\n')
+                in_keyword_section = False
+                for line in lines:
+                    if "Keyword" in line:
+                        in_keyword_section = True
+                        keyword_section += line + "\n"
+                    elif in_keyword_section and line.strip() and not any(section in line for section in ["Title", "Bullet", "Description", "Image"]):
+                        keyword_section += line + "\n"
+                    elif in_keyword_section and any(section in line for section in ["Title", "Bullet", "Description", "Image"]):
+                        in_keyword_section = False
+            
+            if keyword_section:
+                st.markdown("#### Keyword Recommendations")
+                st.markdown(keyword_section)
+            else:
+                st.info("Generate full listing recommendations to see keyword suggestions")
+        else:
+            st.info("Run AI Optimization to get keyword recommendations")
+        
+        # Generate keywords button
+        if st.button("Generate Keyword Recommendations", key="keyword_button"):
+            with st.spinner("Generating keyword recommendations..."):
+                # Increment the API call counter
+                if 'ai_api_calls' in st.session_state:
+                    st.session_state.ai_api_calls += 1
+                
+                prompt = f"""Generate keyword recommendations for this Amazon medical device listing:
+                
+                Product: {product_info['name']}
+                Category: {product_info['category']}
+                Description: {product_info['description']}
+                
+                Please provide:
+                1. Primary keywords (5-7 most important search terms)
+                2. Secondary keywords (8-10 additional relevant terms)
+                3. Long-tail keyword phrases (5-7 specific search phrases)
+                4. Backend keywords (for Amazon backend search terms field)
+                5. Competitor keywords (terms used by top competitors)
+                
+                Focus on medical terminology, symptoms, conditions, and use cases relevant to this product.
+                """
+                
+                messages = [
+                    {"role": "system", "content": "You are an expert Amazon SEO specialist for medical devices with deep knowledge of search patterns and keyword optimization."},
+                    {"role": "user", "content": prompt}
+                ]
+                
+                try:
+                    # Check which version of the OpenAI SDK is being used
+                    if 'client' in globals():  # New SDK (v1.0.0+)
+                        response = client.chat.completions.create(
+                            model="gpt-4o",
+                            messages=messages,
+                            max_tokens=800,
+                            temperature=0.2
+                        )
+                        result = response.choices[0].message.content
+                    else:  # Legacy SDK (<v1.0.0)
+                        response = openai.ChatCompletion.create(
+                            model="gpt-4o",
+                            messages=messages,
+                            max_tokens=800,
+                            temperature=0.2
+                        )
+                        result = response.choices[0].message.content
+                    
+                    st.success("Keyword recommendations generated!")
+                    st.markdown("### AI-Generated Keywords")
+                    st.markdown(result)
+                except Exception as e:
+                    st.error(f"Error generating keywords: {str(e)}")
+    
+    # Tab 6: Images
+    with tabs[5]:
+        st.markdown("### Image Optimization")
+        st.markdown("""
+        Amazon product image best practices:
+        - Main image with white background
+        - Multiple images showing different angles
+        - In-use/lifestyle images
+        - Size reference images
+        - Feature highlight images
+        - Comparison images
+        - Packaging images
+        """)
+        
+        # Get AI recommendations for images if available
+        if product_info['asin'] in st.session_state.ai_insights and 'listing_optimization' in st.session_state.ai_insights[product_info['asin']]['insights']:
+            listing_insights = st.session_state.ai_insights[product_info['asin']]['insights']['listing_optimization']
+            
+            # Try to extract image recommendations
+            image_section = ""
+            if "Image" in listing_insights:
+                lines = listing_insights.split('\n')
+                in_image_section = False
+                for line in lines:
+                    if "Image" in line:
+                        in_image_section = True
+                        image_section += line + "\n"
+                    elif in_image_section and line.strip() and not any(section in line for section in ["Title", "Bullet", "Description", "Keyword"]):
+                        image_section += line + "\n"
+                    elif in_image_section and any(section in line for section in ["Title", "Bullet", "Description", "Keyword"]):
+                        in_image_section = False
+            
+            if image_section:
+                st.markdown("#### Image Recommendations")
+                st.markdown(image_section)
+            else:
+                st.info("Generate full listing recommendations to see image optimization suggestions")
+        else:
+            st.info("Run AI Optimization to get image recommendations")
+        
+        # Image checklist
+        st.markdown("### Amazon Image Checklist")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### Essential Images")
+            main_image = st.checkbox("Main image with white background", value=False)
+            alternate_angles = st.checkbox("3+ alternate angle images", value=False)
+            product_in_use = st.checkbox("Product in use / lifestyle image", value=False)
+            size_reference = st.checkbox("Size reference image", value=False)
+            features_highlighted = st.checkbox("Features/benefits highlighted", value=False)
+        
+        with col2:
+            st.markdown("#### Enhanced Images")
+            packaging = st.checkbox("Packaging image", value=False)
+            accessories = st.checkbox("Accessories/included items", value=False)
+            instructions = st.checkbox("How-to-use visual guide", value=False)
+            comparison = st.checkbox("Comparison with similar products", value=False)
+            infographic = st.checkbox("Benefits infographic", value=False)
+        
+        # Calculate image score
+        essential_count = sum([main_image, alternate_angles, product_in_use, size_reference, features_highlighted])
+        enhanced_count = sum([packaging, accessories, instructions, comparison, infographic])
+        
+        image_score = (essential_count / 5) * 70 + (enhanced_count / 5) * 30
+        
+        # Display image score
+        st.markdown(f"### Image Score: {image_score:.1f}/100")
+        
+        # Image score gauge
+        if AVAILABLE_MODULES['plotly']:
+            fig = go.Figure(go.Indicator(
+                mode = "gauge+number",
+                value = image_score,
+                domain = {'x': [0, 1], 'y': [0, 1]},
+                title = {'text': "Image Optimization Score"},
+                gauge = {
+                    'axis': {'range': [0, 100]},
+                    'bar': {'color': "royalblue"},
+                    'steps': [
+                        {'range': [0, 40], 'color': "lightcoral"},
+                        {'range': [40, 70], 'color': "khaki"},
+                        {'range': [70, 100], 'color': "lightgreen"}
+                    ],
+                    'threshold': {
+                        'line': {'color': "black", 'width': 4},
+                        'thickness': 0.75,
+                        'value': 80
+                    }
+                }
+            ))
+            
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # Generate image recommendations button
+        if st.button("Generate Image Recommendations", key="image_button"):
+            with st.spinner("Generating image recommendations..."):
+                # Increment the API call counter
+                if 'ai_api_calls' in st.session_state:
+                    st.session_state.ai_api_calls += 1
+                
+                prompt = f"""Create detailed image recommendations for this Amazon medical device listing:
+                
+                Product: {product_info['name']}
+                Category: {product_info['category']}
+                Description: {product_info['description']}
+                
+                Current image score: {image_score}/100
+                
+                Provide the following:
+                1. Specific types of images needed for this product (7-9 total images)
+                2. Key features that should be highlighted in close-ups
+                3. How to show the product in use (lifestyle images)
+                4. Size reference recommendations
+                5. Any infographics that would help explain benefits
+                6. How to visually address common customer questions/concerns
+                
+                Be specific to this type of medical device and focus on images that would increase conversion rate.
+                """
+                
+                messages = [
+                    {"role": "system", "content": "You are an expert Amazon listing optimization specialist for medical devices with expertise in product photography and image optimization."},
+                    {"role": "user", "content": prompt}
+                ]
+                
+                try:
+                    # Check which version of the OpenAI SDK is being used
+                    if 'client' in globals():  # New SDK (v1.0.0+)
+                        response = client.chat.completions.create(
+                            model="gpt-4o",
+                            messages=messages,
+                            max_tokens=800,
+                            temperature=0.2
+                        )
+                        result = response.choices[0].message.content
+                    else:  # Legacy SDK (<v1.0.0)
+                        response = openai.ChatCompletion.create(
+                            model="gpt-4o",
+                            messages=messages,
+                            max_tokens=800,
+                            temperature=0.2
+                        )
+                        result = response.choices[0].message.content
+                    
+                    st.success("Image recommendations generated!")
+                    st.markdown("### AI-Generated Image Recommendations")
+                    st.markdown(result)
+                except Exception as e:
+                    st.error(f"Error generating image recommendations: {str(e)}")
+    
+    # Tab 7: Competitive Analysis
+    with tabs[6]:
+        st.markdown("### Competitive Analysis")
+        
+        # Get competitors data
+        competitors = []
+        if 'competitors' in st.session_state.uploaded_files and product_info['asin'] in st.session_state.uploaded_files['competitors']:
+            competitors = st.session_state.uploaded_files['competitors'][product_info['asin']]
+        
+        if competitors:
+            st.markdown(f"#### {len(competitors)} Competing Products")
+            
+            for comp in competitors:
+                st.markdown(f"- {comp['name']} ([{comp['asin']}](https://www.amazon.com/dp/{comp['asin']}))")
+        else:
+            st.info("No competitors data available. Add competing products in the Manual Entry tab.")
+        
+        # Add competitor form
+        with st.form("add_competitor"):
+            st.markdown("### Add Competitor")
+            comp_asin = st.text_input("Competitor ASIN")
+            comp_name = st.text_input("Competitor Product Name")
+            
+            submitted = st.form_submit_button("Add Competitor")
+            
+            if submitted and comp_asin and comp_name:
+                # Add to competitors list
+                if 'competitors' not in st.session_state.uploaded_files:
+                    st.session_state.uploaded_files['competitors'] = {}
+                
+                if product_info['asin'] not in st.session_state.uploaded_files['competitors']:
+                    st.session_state.uploaded_files['competitors'][product_info['asin']] = []
+                
+                st.session_state.uploaded_files['competitors'][product_info['asin']].append({
+                    "asin": comp_asin,
+                    "name": comp_name,
+                    "product_asin": product_info['asin']
+                })
+                
+                st.success(f"Added competitor: {comp_name}")
                 st.rerun()
-        else:
-            st.info("No analysis results available. Please select and analyze a product.")
+        
+        # Competitive analysis button
+        if st.button("Generate Competitive Analysis", key="competitive_button"):
+            if not competitors:
+                st.warning("Please add competitors first to perform competitive analysis")
+            else:
+                with st.spinner("Generating competitive analysis..."):
+                    # Increment the API call counter
+                    if 'ai_api_calls' in st.session_state:
+                        st.session_state.ai_api_calls += 1
+                    
+                    competitor_list = "\n".join([f"- {comp['name']} (ASIN: {comp['asin']})" for comp in competitors])
+                    
+                    prompt = f"""Perform a competitive analysis for this Amazon medical device and its competitors:
+                    
+                    Your Product: {product_info['name']} (ASIN: {product_info['asin']})
+                    Category: {product_info['category']}
+                    
+                    Competitors:
+                    {competitor_list}
+                    
+                    Provide the following analysis:
+                    1. Competitive positioning strategy
+                    2. Key differentiators to highlight in your listing
+                    3. Price positioning recommendations
+                    4. Feature comparison strategy
+                    5. Unique selling propositions to emphasize
+                    6. Weaknesses of competitors to address
+                    7. Customer pain points competitors aren't solving
+                    
+                    Focus on how to optimize the Amazon listing to stand out from these specific competitors.
+                    """
+                    
+                    messages = [
+                        {"role": "system", "content": "You are an expert Amazon marketplace strategist specializing in competitive analysis and differentiation for medical device products."},
+                        {"role": "user", "content": prompt}
+                    ]
+                    
+                    try:
+                        # Check which version of the OpenAI SDK is being used
+                        if 'client' in globals():  # New SDK (v1.0.0+)
+                            response = client.chat.completions.create(
+                                model="gpt-4o",
+                                messages=messages,
+                                max_tokens=1000,
+                                temperature=0.2
+                            )
+                            result = response.choices[0].message.content
+                        else:  # Legacy SDK (<v1.0.0)
+                            response = openai.ChatCompletion.create(
+                                model="gpt-4o",
+                                messages=messages,
+                                max_tokens=1000,
+                                temperature=0.2
+                            )
+                            result = response.choices[0].message.content
+                        
+                        st.success("Competitive analysis generated!")
+                        st.markdown("### AI-Generated Competitive Analysis")
+                        st.markdown(result)
+                        
+                        # Store in AI insights
+                        if product_info['asin'] not in st.session_state.ai_insights:
+                            st.session_state.ai_insights[product_info['asin']] = {
+                                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                'insights': {}
+                            }
+                        
+                        st.session_state.ai_insights[product_info['asin']]['insights']['competitive_analysis'] = result
+                    except Exception as e:
+                        st.error(f"Error generating competitive analysis: {str(e)}")
 
 def render_ai_insights():
     """Render the AI insights section."""
     st.header("AI Insights")
     
     if not AVAILABLE_MODULES['ai_api']:
-        st.warning("AI insights require OpenAI API integration. Please add your API key in the Settings panel.")
+        st.warning("AI insights require OpenAI API integration. Please add your API key to Streamlit secrets.")
         return
     
     # Check if we have AI insights to display
@@ -1305,50 +2102,373 @@ def render_ai_insights():
             st.caption(f"Analyzed on: {insights['timestamp']}")
             
             # Create tabs for different sections of the AI insights
-            tabs = st.tabs(["Recommendations", "Review Analysis", "Return Analysis"])
+            tabs = st.tabs(["Overview", "Listing Optimization", "Review Analysis", "Return Analysis", "Export"])
             
-            # Tab 1: Recommendations
+            # Tab 1: Overview
             with tabs[0]:
+                st.markdown("### Key Insights Summary")
+                
+                # Overview dashboard with metrics
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.metric("Return Rate", f"{product_info.get('return_rate_30d', 0):.2f}%")
+                    
+                    # Benchmarking
+                    if product_info.get('return_rate_30d', 0) < 3:
+                        st.success("Below average return rate for medical devices")
+                    elif product_info.get('return_rate_30d', 0) < 7:
+                        st.info("Average return rate for medical devices")
+                    else:
+                        st.error("Above average return rate for medical devices")
+                
+                with col2:
+                    if product_info.get('star_rating'):
+                        st.metric("Star Rating", f"{product_info.get('star_rating', 0):.1f} ★")
+                        
+                        # Rating benchmarking
+                        if product_info.get('star_rating', 0) >= 4.5:
+                            st.success("Excellent rating")
+                        elif product_info.get('star_rating', 0) >= 4.0:
+                            st.info("Good rating")
+                        elif product_info.get('star_rating', 0) >= 3.5:
+                            st.warning("Average rating")
+                        else:
+                            st.error("Below average rating")
+                
+                with col3:
+                    # Calculate conversion impact
+                    if product_info.get('return_rate_30d') is not None:
+                        potential_savings = product_info.get('sales_30d', 0) * (product_info.get('return_rate_30d', 0) / 100) * 20  # $20 per return saved
+                        st.metric("Potential Monthly Savings", f"${potential_savings:.2f}")
+                        st.caption("If return rate improved by 1%")
+                
+                # Display recommendations if available
                 if 'recommendations' in insights['insights']:
+                    st.markdown("### AI Product Recommendations")
                     st.markdown(insights['insights']['recommendations'])
                 else:
-                    st.info("No AI recommendations available. Run an AI-Enhanced Analysis to generate recommendations.")
+                    st.info("Run an AI-Enhanced Analysis to generate comprehensive recommendations.")
             
-            # Tab 2: Review Analysis
+            # Tab 2: Listing Optimization
             with tabs[1]:
+                if 'listing_optimization' in insights['insights']:
+                    st.markdown("### Listing Optimization Recommendations")
+                    st.markdown(insights['insights']['listing_optimization'])
+                    
+                    # Add competitive analysis if available
+                    if 'competitive_analysis' in insights['insights']:
+                        st.markdown("### Competitive Analysis")
+                        st.markdown(insights['insights']['competitive_analysis'])
+                else:
+                    st.info("No listing optimization insights available. Go to the Listing Optimization tab to generate recommendations.")
+            
+            # Tab 3: Review Analysis
+            with tabs[2]:
                 if 'review_insights' in insights['insights'] and insights['insights']['review_insights']:
                     review_insights = insights['insights']['review_insights']
                     
+                    st.markdown(f"### Analysis of {len(review_insights)} Reviews")
+                    
+                    # Extract common themes
+                    positive_themes = set()
+                    negative_themes = set()
+                    improvement_suggestions = set()
+                    
+                    # Process all reviews to extract themes
+                    for insight in review_insights:
+                        analysis = insight['analysis']
+                        
+                        # Look for positive feedback
+                        if "positive" in analysis.lower():
+                            # Extract positive themes with simple pattern matching
+                            for line in analysis.split('\n'):
+                                if "positive" in line.lower() and ":" in line:
+                                    theme = line.split(":", 1)[1].strip()
+                                    positive_themes.add(theme)
+                        
+                        # Look for negative feedback
+                        if "negative" in analysis.lower() or "concern" in analysis.lower():
+                            # Extract negative themes with simple pattern matching
+                            for line in analysis.split('\n'):
+                                if any(term in line.lower() for term in ["negative", "concern", "issue"]) and ":" in line:
+                                    theme = line.split(":", 1)[1].strip()
+                                    negative_themes.add(theme)
+                        
+                        # Look for improvement suggestions
+                        if "improve" in analysis.lower() or "suggestion" in analysis.lower():
+                            for line in analysis.split('\n'):
+                                if any(term in line.lower() for term in ["improve", "suggestion", "recommend"]) and ":" in line:
+                                    suggestion = line.split(":", 1)[1].strip()
+                                    improvement_suggestions.add(suggestion)
+                    
+                    # Display themes
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown("#### Common Positive Themes")
+                        if positive_themes:
+                            for theme in positive_themes:
+                                st.success(theme)
+                        else:
+                            st.info("No consistent positive themes identified")
+                    
+                    with col2:
+                        st.markdown("#### Common Negative Themes")
+                        if negative_themes:
+                            for theme in negative_themes:
+                                st.error(theme)
+                        else:
+                            st.info("No consistent negative themes identified")
+                    
+                    st.markdown("#### Improvement Suggestions")
+                    if improvement_suggestions:
+                        for suggestion in improvement_suggestions:
+                            st.info(suggestion)
+                    else:
+                        st.info("No specific improvement suggestions identified")
+                    
+                    # Individual review insights
+                    st.markdown("#### Individual Review Analysis")
                     for i, insight in enumerate(review_insights):
                         with st.expander(f"Review {i+1}: {insight['review'][:50]}... (Rating: {insight['rating']})"):
-                            st.subheader("Original Review")
+                            st.markdown("**Original Review**")
                             st.write(insight['review'])
                             
-                            st.subheader("Sentiment Analysis")
-                            st.markdown(insight['sentiment_analysis'])
-                            
-                            st.subheader("Medical Concerns")
-                            st.markdown(insight['medical_concerns'])
-                            
-                            st.subheader("Compliance Issues")
-                            st.markdown(insight['compliance_issues'])
+                            st.markdown("**AI Analysis**")
+                            st.markdown(insight['analysis'])
                 else:
                     st.info("No AI review insights available. Run an AI-Enhanced Analysis with reviews data to generate insights.")
             
-            # Tab 3: Return Analysis
-            with tabs[2]:
+            # Tab 4: Return Analysis
+            with tabs[3]:
                 if 'return_insights' in insights['insights'] and insights['insights']['return_insights']:
                     return_insights = insights['insights']['return_insights']
                     
-                    for i, insight in enumerate(return_insights):
-                        with st.expander(f"Return Reason {i+1}: {insight['return_reason'][:50]}..."):
-                            st.subheader("Original Return Reason")
-                            st.write(insight['return_reason'])
+                    st.markdown(f"### Analysis of {len(return_insights)} Return Reasons")
+                    
+                    # Extract common return categories
+                    quality_issues = []
+                    sizing_issues = []
+                    expectation_issues = []
+                    instruction_issues = []
+                    other_issues = []
+                    
+                    # Process all returns to categorize
+                    for insight in return_insights:
+                        return_reason = insight['return_reason'].lower()
+                        analysis = insight['analysis'].lower()
+                        
+                        if any(term in return_reason or term in analysis for term in ["quality", "defect", "broke", "damaged", "not working"]):
+                            quality_issues.append(insight)
+                        elif any(term in return_reason or term in analysis for term in ["size", "fit", "too small", "too large"]):
+                            sizing_issues.append(insight)
+                        elif any(term in return_reason or term in analysis for term in ["expect", "thought", "not as described", "not like picture"]):
+                            expectation_issues.append(insight)
+                        elif any(term in return_reason or term in analysis for term in ["confus", "instruction", "manual", "how to", "couldn't figure"]):
+                            instruction_issues.append(insight)
+                        else:
+                            other_issues.append(insight)
+                    
+                    # Calculate percentages
+                    total_returns = len(return_insights)
+                    return_categories = {
+                        "Quality Issues": len(quality_issues),
+                        "Sizing Issues": len(sizing_issues),
+                        "Expectation Mismatch": len(expectation_issues),
+                        "Instruction Problems": len(instruction_issues),
+                        "Other Issues": len(other_issues)
+                    }
+                    
+                    # Create visualization
+                    if AVAILABLE_MODULES['plotly']:
+                        fig = px.pie(
+                            names=list(return_categories.keys()),
+                            values=list(return_categories.values()),
+                            title="Return Reasons Distribution"
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Display return categories
+                    for category, items in [
+                        ("Quality Issues", quality_issues),
+                        ("Sizing Issues", sizing_issues),
+                        ("Expectation Mismatch", expectation_issues),
+                        ("Instruction Problems", instruction_issues),
+                        ("Other Issues", other_issues)
+                    ]:
+                        if items:
+                            with st.expander(f"{category} ({len(items)})", expanded=(category == "Quality Issues")):
+                                for item in items:
+                                    st.markdown(f"**Return Reason:** {item['return_reason']}")
+                                    st.markdown(f"**Analysis:** {item['analysis']}")
+                                    st.divider()
+                    
+                    # Generate recommendations
+                    if st.button("Generate Return Reduction Plan", key="return_plan"):
+                        with st.spinner("Generating return reduction plan..."):
+                            # Increment the API call counter
+                            if 'ai_api_calls' in st.session_state:
+                                st.session_state.ai_api_calls += 1
                             
-                            st.subheader("AI Analysis")
-                            st.markdown(insight['analysis'])
+                            # Prepare categories breakdown
+                            categories_text = "\n".join([f"{category}: {count} returns ({count/total_returns*100:.1f}%)" 
+                                                        for category, count in return_categories.items()])
+                            
+                            # Prepare return reasons text
+                            return_reasons_text = "\n".join([f"- {insight['return_reason']}" for insight in return_insights])
+                            
+                            prompt = f"""Create an actionable return reduction plan for this Amazon medical device:
+                            
+                            Product: {product_info['name']} (ASIN: {product_info['asin']})
+                            Category: {product_info['category']}
+                            Current Return Rate: {product_info.get('return_rate_30d', 0):.2f}%
+                            
+                            Return Reasons Categories:
+                            {categories_text}
+                            
+                            Specific Return Reasons:
+                            {return_reasons_text}
+                            
+                            Please provide:
+                            1. Immediate listing changes to reduce returns (top 3 priorities)
+                            2. Product improvement recommendations
+                            3. Packaging/instructions improvements
+                            4. Customer expectation management strategies
+                            5. Expected impact on return rate for each recommendation
+                            
+                            The plan should be specific, actionable, and prioritized by impact.
+                            """
+                            
+                            messages = [
+                                {"role": "system", "content": "You are an expert Amazon listing optimization specialist with deep expertise in reducing return rates for medical devices."},
+                                {"role": "user", "content": prompt}
+                            ]
+                            
+                            try:
+                                # Check which version of the OpenAI SDK is being used
+                                if 'client' in globals():  # New SDK (v1.0.0+)
+                                    response = client.chat.completions.create(
+                                        model="gpt-4o",
+                                        messages=messages,
+                                        max_tokens=1000,
+                                        temperature=0.2
+                                    )
+                                    result = response.choices[0].message.content
+                                else:  # Legacy SDK (<v1.0.0)
+                                    response = openai.ChatCompletion.create(
+                                        model="gpt-4o",
+                                        messages=messages,
+                                        max_tokens=1000,
+                                        temperature=0.2
+                                    )
+                                    result = response.choices[0].message.content
+                                
+                                st.success("Return reduction plan generated!")
+                                st.markdown("### Return Reduction Plan")
+                                st.markdown(result)
+                                
+                                # Store in AI insights
+                                st.session_state.ai_insights[product_info['asin']]['insights']['return_reduction_plan'] = result
+                            except Exception as e:
+                                st.error(f"Error generating return reduction plan: {str(e)}")
                 else:
                     st.info("No AI return insights available. Run an AI-Enhanced Analysis with return reasons data to generate insights.")
+            
+            # Tab 5: Export
+            with tabs[4]:
+                st.markdown("### Export AI Insights")
+                
+                # Prepare content for export
+                export_content = f"# AI Insights for {product_info['name']} ({product_info['asin']})\n"
+                export_content += f"Generated on: {insights['timestamp']}\n\n"
+                
+                if 'recommendations' in insights['insights']:
+                    export_content += "## Recommendations\n"
+                    export_content += insights['insights']['recommendations'] + "\n\n"
+                
+                if 'listing_optimization' in insights['insights']:
+                    export_content += "## Listing Optimization\n"
+                    export_content += insights['insights']['listing_optimization'] + "\n\n"
+                
+                if 'return_reduction_plan' in insights['insights']:
+                    export_content += "## Return Reduction Plan\n"
+                    export_content += insights['insights']['return_reduction_plan'] + "\n\n"
+                
+                if 'competitive_analysis' in insights['insights']:
+                    export_content += "## Competitive Analysis\n"
+                    export_content += insights['insights']['competitive_analysis'] + "\n\n"
+                
+                # Download buttons
+                st.download_button(
+                    label="Export as Markdown",
+                    data=export_content,
+                    file_name=f"{product_info['asin']}_ai_insights.md",
+                    mime="text/markdown"
+                )
+                
+                # Export to Excel (if xlsxwriter available)
+                if HAS_LOCAL_MODULES and AVAILABLE_MODULES['xlsx_writer'] and AVAILABLE_MODULES['pandas'] and 'review_insights' in insights['insights']:
+                    try:
+                        # Create Excel output
+                        output = io.BytesIO()
+                        writer = pd.ExcelWriter(output, engine='xlsxwriter')
+                        
+                        # Create review insights sheet
+                        if 'review_insights' in insights['insights'] and insights['insights']['review_insights']:
+                            reviews_data = []
+                            for insight in insights['insights']['review_insights']:
+                                reviews_data.append({
+                                    'Review': insight['review'],
+                                    'Rating': insight['rating'],
+                                    'Analysis': insight['analysis']
+                                })
+                            
+                            reviews_df = pd.DataFrame(reviews_data)
+                            reviews_df.to_excel(writer, sheet_name='Review Analysis', index=False)
+                        
+                        # Create return insights sheet
+                        if 'return_insights' in insights['insights'] and insights['insights']['return_insights']:
+                            returns_data = []
+                            for insight in insights['insights']['return_insights']:
+                                returns_data.append({
+                                    'Return Reason': insight['return_reason'],
+                                    'Analysis': insight['analysis']
+                                })
+                            
+                            returns_df = pd.DataFrame(returns_data)
+                            returns_df.to_excel(writer, sheet_name='Return Analysis', index=False)
+                        
+                        # Create recommendations sheet
+                        if 'recommendations' in insights['insights']:
+                            recommendations_df = pd.DataFrame({
+                                'Section': ['Product Recommendations'],
+                                'Content': [insights['insights']['recommendations']]
+                            })
+                            recommendations_df.to_excel(writer, sheet_name='Recommendations', index=False)
+                        
+                        # Create listing optimization sheet
+                        if 'listing_optimization' in insights['insights']:
+                            listing_df = pd.DataFrame({
+                                'Section': ['Listing Optimization'],
+                                'Content': [insights['insights']['listing_optimization']]
+                            })
+                            listing_df.to_excel(writer, sheet_name='Listing Optimization', index=False)
+                        
+                        # Save the workbook
+                        writer.close()
+                        
+                        # Provide download button for Excel
+                        st.download_button(
+                            label="Export as Excel",
+                            data=output.getvalue(),
+                            file_name=f"{product_info['asin']}_ai_insights.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
+                    except Exception as e:
+                        st.error(f"Error creating Excel export: {str(e)}")
+                else:
+                    st.warning("Excel export requires xlsxwriter and pandas. These modules may not be available.")
         else:
             st.warning(f"No AI insights available for {st.session_state.current_product['name']}. Please run an AI-Enhanced Analysis first.")
     else:
@@ -1370,157 +2490,111 @@ def render_help_section():
     """Render the help and documentation section."""
     st.header("Help & Documentation")
     
-    help_tabs = st.tabs(["User Guide", "FAQ", "Medical Device Context", "Support"])
+    help_tabs = st.tabs(["Quick Start", "Import Options", "AI Features", "Support"])
     
     with help_tabs[0]:
-        st.subheader("Getting Started")
+        st.subheader("Quick Start Guide")
         st.markdown("""
-        1. **Import Data**: Choose one of these methods:
-           - Upload a CSV or Excel file with product data
-           - Manually enter product details in the "Manual Entry" tab
-           - Upload PDF reports or screenshots for OCR processing
+        ### 1. Import Your Amazon Data
+        - Click the **Load Example Data** button in the sidebar to try with sample data
+        - Or upload your own data in the **Import** tab
+        - You can import structured data (CSV/Excel), enter data manually, or upload images/screenshots
         
-        2. **Select Product**: Choose the product you want to analyze.
+        ### 2. Select and Analyze a Product
+        - In the **Analyze** tab, select a product from your imported data
+        - Click **AI-Enhanced Analysis** to get deep insights
         
-        3. **Run Analysis**: You have two options:
-           - Standard Analysis: Basic metrics and visualizations
-           - AI-Enhanced Analysis: Deep insights using AI (requires API key)
+        ### 3. Optimize Your Amazon Listing
+        - The **Listing Optimization** tab provides recommendations for:
+          - Title optimization
+          - Bullet points
+          - Product description
+          - Keywords
+          - Images
+          - Competitive positioning
         
-        4. **Review Results**: Explore the analysis, recommendations, and visualizations:
-           - Summary: Quick overview of key metrics
-           - Detailed Analysis: In-depth breakdown of reviews and returns
-           - Visualizations: Charts and graphs of the data
-           - Export: Download your analysis results
+        ### 4. Review Detailed AI Insights
+        - The **AI Insights** tab breaks down:
+          - Review analysis and patterns
+          - Return reasons analysis
+          - Specific improvement recommendations
         
-        5. **AI Insights**: Review AI-powered analysis:
-           - Recommendations: Product improvement suggestions
-           - Review Analysis: Detailed breakdown of individual reviews
-           - Return Analysis: Root cause analysis of return reasons
+        ### 5. Export Recommendations
+        - Export insights as Markdown or Excel for sharing with your team
         """)
         
-        st.subheader("Required Data Format")
-        st.markdown("""
-        The application requires certain fields to perform analysis:
-        
-        * **Mandatory fields** (marked with *):
-          * ASIN*
-          * Last 30 Days Sales*
-          * Last 30 Days Returns*
-        
-        * **Recommended fields** (will improve analysis):
-          * SKU
-          * Product Name
-          * Category
-          * FDA Device Class
-          * Prescription Status
-          * Product Description
-          * Star Rating
-          * Total Reviews
-          * Last 365 Days Sales
-          * Last 365 Days Returns
-        
-        You can download a sample template from the Import tab.
-        """)
+        st.info("💡 **Pro Tip:** Start with the example data to explore all features, then import your actual product data when you're ready.")
     
     with help_tabs[1]:
-        st.subheader("Frequently Asked Questions")
-        
-        with st.expander("How does the AI analysis work?"):
-            st.markdown("""
-            The AI-Enhanced Analysis leverages advanced natural language processing to:
-            
-            1. **Analyze Reviews**: Identifies sentiment, medical concerns, and compliance issues
-            2. **Analyze Return Reasons**: Determines root causes of returns
-            3. **Generate Recommendations**: Provides actionable insights for product improvement
-            
-            The AI is specifically trained to understand medical device terminology and regulatory context,
-            making it ideal for analyzing medical device products sold on Amazon.
-            
-            To use this feature, you need to provide an OpenAI API key in the Settings panel.
-            """)
-        
-        with st.expander("What is FDA Device Classification?"):
-            st.markdown("""
-            The FDA classifies medical devices into three categories based on risk:
-            
-            * **Class I**: Low risk devices (e.g., bandages, handheld surgical instruments)
-               - Subject to general controls
-               - Usually exempt from premarket notification (510(k))
-            
-            * **Class II**: Moderate risk devices (e.g., powered wheelchairs, infusion pumps)
-               - Subject to special controls
-               - Usually require premarket notification (510(k))
-            
-            * **Class III**: High risk devices (e.g., implantable pacemakers)
-               - Subject to premarket approval (PMA)
-               - Require clinical trials
-            
-            The AI can help classify your product if you're unsure of its FDA designation.
-            """)
-        
-        with st.expander("How can I improve the quality of my analysis?"):
-            st.markdown("""
-            To get the most comprehensive analysis:
-            
-            1. **Provide complete data**: Include as many optional fields as possible
-            2. **Add detailed reviews**: The more review text, the better the AI analysis
-            3. **Include return reasons**: Specific reasons help identify quality issues
-            4. **Add product descriptions**: Helps with device classification and context
-            5. **Use historical data**: Enables trend analysis and pattern detection
-            
-            The AI analysis improves with more context about your product.
-            """)
-        
-        with st.expander("How should I use the recommendations?"):
-            st.markdown("""
-            The AI recommendations are designed to:
-            
-            1. **Identify quality issues**: Potential defects or design flaws
-            2. **Highlight regulatory concerns**: Compliance risks that need attention
-            3. **Suggest improvements**: Product enhancements based on customer feedback
-            4. **Prioritize actions**: Most impactful changes to reduce returns
-            
-            Use these insights for:
-            - Product development planning
-            - Quality improvement initiatives
-            - Regulatory compliance checks
-            - Customer communication strategies
-            
-            Always validate AI recommendations with your quality team before implementation.
-            """)
-    
-    with help_tabs[2]:
-        st.subheader("Medical Device Context")
+        st.subheader("Data Import Options")
         
         st.markdown("""
-        ### Medical Device Regulations
+        ### Structured Data Import
+        Upload a CSV or Excel file with your Amazon product data. Required columns:
+        - **ASIN** (Amazon Standard Identification Number)
+        - **Last 30 Days Sales** 
+        - **Last 30 Days Returns**
         
-        Products sold as medical devices, even on Amazon, are subject to various regulations:
+        Additional columns that improve analysis:
+        - Product Name
+        - SKU
+        - Category
+        - Product Description
+        - Star Rating
+        - Total Reviews
+        - Last 365 Days Sales/Returns
         
-        * **FDA Regulations**: Class I, II, and III classifications with different requirements
-        * **Quality System Regulation (QSR)**: Requirements for design, manufacturing, packaging, etc.
-        * **Medical Device Reporting (MDR)**: Mandatory reporting of adverse events
-        * **Labeling Requirements**: Specific content and format for labels and instructions
+        ### Manual Entry
+        Enter data for a single product when you don't have a spreadsheet:
+        - Basic product info
+        - Sales and returns
+        - Reviews and return reasons
+        - Competing products
         
-        ### Common Medical Device Issues
+        ### Image/Review Import
+        Upload screenshots of:
+        - Amazon product reviews
+        - Return reports
+        - Your product listing
+        - Competitor listings
         
-        Medical devices sold on Amazon often face these specific challenges:
+        The system uses OCR to extract text for analysis.
         
-        * **User Expectations**: Consumers may expect medical-grade performance from wellness products
-        * **Regulatory Grey Areas**: Some products exist between medical device and consumer product categories
-        * **Return Rate Considerations**: Medical devices typically have higher acceptable return rates (3-8%) compared to general consumer products (1-3%)
-        * **Special Quality Concerns**: Safety, effectiveness, and durability are especially important
-        
-        ### Using This Tool for Medical Devices
-        
-        This tool is specifically designed to help with:
-        
-        * Identifying potential regulatory compliance issues
-        * Detecting safety concerns from customer feedback
-        * Understanding quality issues specific to medical devices
-        * Benchmarking return rates against medical device standards
-        * Generating improvement recommendations with regulatory context
+        ### Historical Data
+        Upload historical sales/returns data to identify trends and seasonality.
         """)
+    
+    with help_tabs[2]:
+        st.subheader("AI Features")
+        
+        st.markdown("""
+        This tool uses OpenAI's GPT-4o model to provide advanced e-commerce optimization:
+        
+        ### Listing Optimization
+        - **Title Optimization**: Keyword-rich, conversion-focused titles
+        - **Bullet Points**: Benefit-focused feature highlights
+        - **Description Enhancement**: Persuasive, well-formatted content
+        - **Keyword Research**: Relevant search terms for your specific medical device
+        - **Image Recommendations**: Specific photo types to improve conversions
+        
+        ### Customer Feedback Analysis
+        - **Review Pattern Detection**: Identifies common themes in customer reviews
+        - **Return Reason Analysis**: Categorizes and prioritizes return issues
+        - **Sentiment Analysis**: Extracts positive and negative feedback
+        
+        ### Strategic Recommendations
+        - **Return Reduction Plans**: Targeted actions to reduce return rates
+        - **Competitive Analysis**: Positioning against similar products
+        - **Product Improvement Suggestions**: Based on customer feedback
+        
+        ### Data Visualization
+        - Return rate trends
+        - Review sentiment analysis
+        - Listing quality scoring
+        - Return reason categorization
+        """)
+        
+        st.warning("Note: The AI requires your OpenAI API key to be configured in Streamlit secrets. The API key should be stored as 'OPENAI_API_KEY' in your secrets.toml file.")
     
     with help_tabs[3]:
         st.subheader("Support Resources")
@@ -1535,6 +2609,8 @@ def render_help_section():
         Available modules are shown in the sidebar. If a module is marked as unavailable,
         that functionality will be limited in the application.
         """)
+        
+        st.info("💡 **Tip:** Use the 'Load Example Data' button in the sidebar to see how the app works with sample data.")
 
 # Run the application
 if __name__ == "__main__":
