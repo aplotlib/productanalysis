@@ -16,9 +16,9 @@ logging.basicConfig(level=logging.INFO,
                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# Remove the API_KEY_NAME constant since we're directly accessing the key
 # Constants
 SUPPORT_EMAIL = "alexander.popoff@vivehealth.com"
-API_KEY_NAME = "openai_api_key"  # Variable name in streamlit app settings
 
 # Track available modules
 AVAILABLE_MODULES = {
@@ -83,20 +83,15 @@ try:
 except ImportError:
     logger.warning("OCR modules not available")
 
-# Try importing OpenAI - for AI analysis - Always use streamlit secrets
+# Try importing OpenAI - for AI analysis
 try:
     import openai
     from openai import OpenAI  # Import the OpenAI client class for newer SDK
     
-    # Get API key from Streamlit secrets
-    # Try to get the API key directly from st.secrets dictionary
+    # Get API key directly from Streamlit secrets
     try:
         api_key = st.secrets["openai_api_key"]
-    except:
-        # Fallback to the get method which returns None if key doesn't exist
-        api_key = st.secrets.get(API_KEY_NAME)
-    
-    if api_key:
+        
         # Set up the client - works with both legacy and new SDK
         if hasattr(openai, 'OpenAI'):  # Check if using newer OpenAI SDK (v1.0.0+)
             client = OpenAI(api_key=api_key)
@@ -106,8 +101,8 @@ try:
             openai.api_key = api_key
             AVAILABLE_MODULES['ai_api'] = True
             logger.info("OpenAI API initialized successfully from secrets (legacy)")
-    else:
-        logger.warning("OpenAI API key not found in Streamlit secrets as 'openai_api_key'")
+    except Exception as e:
+        logger.warning(f"OpenAI API key not found in Streamlit secrets as 'openai_api_key': {str(e)}")
 except ImportError:
     logger.warning("OpenAI module not available")
 except Exception as e:
@@ -275,25 +270,33 @@ if AVAILABLE_MODULES['ai_api']:
                 {"role": "user", "content": prompt}
             ]
             
-            # Check which version of the OpenAI SDK is being used
-            if 'client' in globals():  # New SDK (v1.0.0+)
-                response = client.chat.completions.create(
-                    model="gpt-4o",
-                    messages=messages,
-                    max_tokens=750,
-                    temperature=0.2
-                )
-                result = response.choices[0].message.content
-            else:  # Legacy SDK (<v1.0.0)
-                response = openai.ChatCompletion.create(
-                    model="gpt-4o",
-                    messages=messages,
-                    max_tokens=750,
-                    temperature=0.2
-                )
-                result = response.choices[0].message.content
+            # API call with direct request to OpenAI
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}"
+            }
+            
+            payload = {
+                "model": "gpt-4o",
+                "messages": messages,
+                "max_tokens": 750,
+                "temperature": 0.2
+            }
+            
+            response = requests.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers=headers,
+                data=json.dumps(payload),
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                result = response.json()["choices"][0]["message"]["content"]
+                return {"success": True, "result": result}
+            else:
+                logger.error(f"API error: {response.status_code} - {response.text}")
+                return {"success": False, "error": f"API error: {response.status_code}"}
                 
-            return {"success": True, "result": result}
         except Exception as e:
             logger.error(f"AI analysis error: {str(e)}")
             return {"success": False, "error": str(e)}
@@ -333,25 +336,33 @@ if AVAILABLE_MODULES['ai_api']:
                 {"role": "user", "content": prompt}
             ]
             
-            # Check which version of the OpenAI SDK is being used
-            if 'client' in globals():  # New SDK (v1.0.0+)
-                response = client.chat.completions.create(
-                    model="gpt-4o",
-                    messages=messages,
-                    max_tokens=1000,
-                    temperature=0.2
-                )
-                result = response.choices[0].message.content
-            else:  # Legacy SDK (<v1.0.0)
-                response = openai.ChatCompletion.create(
-                    model="gpt-4o",
-                    messages=messages,
-                    max_tokens=1000,
-                    temperature=0.2
-                )
-                result = response.choices[0].message.content
+            # API call with direct request to OpenAI
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}"
+            }
             
-            return {"success": True, "result": result}
+            payload = {
+                "model": "gpt-4o",
+                "messages": messages,
+                "max_tokens": 1000,
+                "temperature": 0.2
+            }
+            
+            response = requests.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers=headers,
+                data=json.dumps(payload),
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                result = response.json()["choices"][0]["message"]["content"]
+                return {"success": True, "result": result}
+            else:
+                logger.error(f"API error: {response.status_code} - {response.text}")
+                return {"success": False, "error": f"API error: {response.status_code}"}
+            
         except Exception as e:
             logger.error(f"Listing optimization error: {str(e)}")
             return {"success": False, "error": str(e)}
@@ -404,25 +415,33 @@ if AVAILABLE_MODULES['ai_api']:
                 {"role": "user", "content": prompt}
             ]
             
-            # Check which version of the OpenAI SDK is being used
-            if 'client' in globals():  # New SDK (v1.0.0+)
-                response = client.chat.completions.create(
-                    model="gpt-4o",
-                    messages=messages,
-                    max_tokens=1200,
-                    temperature=0.2
-                )
-                result = response.choices[0].message.content
-            else:  # Legacy SDK (<v1.0.0)
-                response = openai.ChatCompletion.create(
-                    model="gpt-4o",
-                    messages=messages,
-                    max_tokens=1200,
-                    temperature=0.2
-                )
-                result = response.choices[0].message.content
+            # API call with direct request to OpenAI
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}"
+            }
             
-            return {"success": True, "result": result}
+            payload = {
+                "model": "gpt-4o",
+                "messages": messages,
+                "max_tokens": 1200,
+                "temperature": 0.2
+            }
+            
+            response = requests.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers=headers,
+                data=json.dumps(payload),
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                result = response.json()["choices"][0]["message"]["content"]
+                return {"success": True, "result": result}
+            else:
+                logger.error(f"API error: {response.status_code} - {response.text}")
+                return {"success": False, "error": f"API error: {response.status_code}"}
+            
         except Exception as e:
             logger.error(f"Recommendation generation error: {str(e)}")
             return {"success": False, "error": str(e)}
