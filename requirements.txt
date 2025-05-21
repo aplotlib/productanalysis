@@ -1,9 +1,27 @@
-Python >=3.10
+# Core Streamlit app
 streamlit>=1.15.0
+
+# Data & analysis
 pandas>=2.0.0
 numpy>=1.24.0
 plotly>=5.14.0
+
+# Imaging & OCR
 Pillow>=9.0.0
-requests>=2.28.0
-XlsxWriter>=3.0.0
+pytesseract>=0.3.10
 pdf2image>=1.16.0
+
+# HTTP & APIs
+requests>=2.28.0
+
+# Excel export
+XlsxWriter>=3.0.0
+
+# Rich (used by Streamlit) – pin to avoid dependency churn
+rich>=14.0.0,<15.0.0
+markdown-it-py>=3.0.0,<4.0.0
+mdurl>=0.1.2,<0.2.0
+pygments>=2.13.0,<3.0.0
+
+# Async support (if you ever use asyncio HTTP clients)
+aiohttp>=3.8.1
