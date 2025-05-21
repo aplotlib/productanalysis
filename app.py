@@ -86,11 +86,17 @@ except ImportError:
 # Try importing OpenAI - for AI analysis
 try:
     import openai
+    from openai import OpenAI  # Import the OpenAI client class for newer SDK
     # Check if we can actually use the API
     api_key = os.environ.get(API_KEY_NAME) or st.secrets.get(API_KEY_NAME, None)
     if api_key:
-        openai.api_key = api_key
-        AVAILABLE_MODULES['ai_api'] = True
+        # Set up the client - works with both legacy and new SDK
+        if hasattr(openai, 'OpenAI'):  # Check if using newer OpenAI SDK (v1.0.0+)
+            client = OpenAI(api_key=api_key)
+            AVAILABLE_MODULES['ai_api'] = True
+        else:  # Legacy SDK (<v1.0.0)
+            openai.api_key = api_key
+            AVAILABLE_MODULES['ai_api'] = True
     else:
         logger.warning("OpenAI API key not found in environment or secrets")
 except ImportError:
@@ -199,17 +205,29 @@ if AVAILABLE_MODULES['ai_api']:
                 Return reason: {text}
                 """
             
-            response = openai.ChatCompletion.create(
-                model="gpt-4-turbo",
-                messages=[
-                    {"role": "system", "content": "You are an expert in medical device quality analysis, FDA regulations, and customer feedback interpretation."},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=500,
-                temperature=0.1
-            )
+            messages = [
+                {"role": "system", "content": "You are an expert in medical device quality analysis, FDA regulations, and customer feedback interpretation."},
+                {"role": "user", "content": prompt}
+            ]
             
-            result = response.choices[0].message.content
+            # Check which version of the OpenAI SDK is being used
+            if 'client' in globals():  # New SDK (v1.0.0+)
+                response = client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=messages,
+                    max_tokens=500,
+                    temperature=0.1
+                )
+                result = response.choices[0].message.content
+            else:  # Legacy SDK (<v1.0.0)
+                response = openai.ChatCompletion.create(
+                    model="gpt-4o",
+                    messages=messages,
+                    max_tokens=500,
+                    temperature=0.1
+                )
+                result = response.choices[0].message.content
+                
             return {"success": True, "result": result}
         except Exception as e:
             logger.error(f"AI analysis error: {str(e)}")
@@ -242,17 +260,29 @@ if AVAILABLE_MODULES['ai_api']:
             4. Whether the device likely requires prescription or is OTC
             """
             
-            response = openai.ChatCompletion.create(
-                model="gpt-4-turbo",
-                messages=[
-                    {"role": "system", "content": "You are an expert in medical device regulatory classification, FDA regulations, and compliance requirements."},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=500,
-                temperature=0.1
-            )
+            messages = [
+                {"role": "system", "content": "You are an expert in medical device regulatory classification, FDA regulations, and compliance requirements."},
+                {"role": "user", "content": prompt}
+            ]
             
-            result = response.choices[0].message.content
+            # Check which version of the OpenAI SDK is being used
+            if 'client' in globals():  # New SDK (v1.0.0+)
+                response = client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=messages,
+                    max_tokens=500,
+                    temperature=0.1
+                )
+                result = response.choices[0].message.content
+            else:  # Legacy SDK (<v1.0.0)
+                response = openai.ChatCompletion.create(
+                    model="gpt-4o",
+                    messages=messages,
+                    max_tokens=500,
+                    temperature=0.1
+                )
+                result = response.choices[0].message.content
+            
             return {"success": True, "result": result}
         except Exception as e:
             logger.error(f"Device classification error: {str(e)}")
@@ -299,17 +329,29 @@ if AVAILABLE_MODULES['ai_api']:
             4. Competitive differentiation opportunities
             """
             
-            response = openai.ChatCompletion.create(
-                model="gpt-4-turbo",
-                messages=[
-                    {"role": "system", "content": "You are an expert in medical device quality improvement, FDA regulations, and customer experience optimization."},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=1000,
-                temperature=0.2
-            )
+            messages = [
+                {"role": "system", "content": "You are an expert in medical device quality improvement, FDA regulations, and customer experience optimization."},
+                {"role": "user", "content": prompt}
+            ]
             
-            result = response.choices[0].message.content
+            # Check which version of the OpenAI SDK is being used
+            if 'client' in globals():  # New SDK (v1.0.0+)
+                response = client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=messages,
+                    max_tokens=1000,
+                    temperature=0.2
+                )
+                result = response.choices[0].message.content
+            else:  # Legacy SDK (<v1.0.0)
+                response = openai.ChatCompletion.create(
+                    model="gpt-4o",
+                    messages=messages,
+                    max_tokens=1000,
+                    temperature=0.2
+                )
+                result = response.choices[0].message.content
+            
             return {"success": True, "result": result}
         except Exception as e:
             logger.error(f"Recommendation generation error: {str(e)}")
@@ -342,13 +384,24 @@ def main():
                 os.environ[API_KEY_NAME] = api_key
                 try:
                     import openai
-                    openai.api_key = api_key
-                    # Test the key
-                    openai.Completion.create(
-                        model="davinci",
-                        prompt="Test",
-                        max_tokens=5
-                    )
+                    # Check which version of the OpenAI SDK is being used
+                    if hasattr(openai, 'OpenAI'):  # New SDK (v1.0.0+)
+                        from openai import OpenAI
+                        client = OpenAI(api_key=api_key)
+                        # Test the key with a minimal call
+                        client.chat.completions.create(
+                            model="gpt-4o",
+                            messages=[{"role": "user", "content": "Test"}],
+                            max_tokens=5
+                        )
+                    else:  # Legacy SDK (<v1.0.0)
+                        openai.api_key = api_key
+                        # Test the key
+                        openai.ChatCompletion.create(
+                            model="gpt-4o",
+                            messages=[{"role": "user", "content": "Test"}],
+                            max_tokens=5
+                        )
                     AVAILABLE_MODULES['ai_api'] = True
                     st.success("API key verified and saved!")
                     st.rerun()
