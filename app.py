@@ -1,41 +1,4 @@
-# Basic test to verify API key works
-def test_openai_api():
-    """Test if the OpenAI API key works with a minimal request"""
-    global api_key
-    
-    if not api_key or not AVAILABLE_MODULES['requests']:
-        return False
-    
-    try:
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}"
-        }
-        
-        payload = {
-            "model": "gpt-4o",
-            "messages": [{"role": "user", "content": "Hello"}],
-            "max_tokens": 5,
-            "temperature": 0.7
-        }
-        
-        response = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers=headers,
-            data=json.dumps(payload),
-            timeout=10
-        )
-        
-        if response.status_code == 200:
-            logger.info("OpenAI API test successful")
-            return True
-        else:
-            logger.error(f"OpenAI API test failed: {response.status_code} - {response.text}")
-            return False
-            
-    except Exception as e:
-        logger.error(f"Error testing OpenAI API: {str(e)}")
-        return Falseimport streamlit as st
+import streamlit as st
 import pandas as pd
 import numpy as np
 import io
@@ -47,15 +10,26 @@ import requests
 import base64
 import tempfile
 from datetime import datetime, timedelta
+from pathlib import Path
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, 
                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Remove the API_KEY_NAME constant since we're directly accessing the key
 # Constants
 SUPPORT_EMAIL = "alexander.popoff@vivehealth.com"
+
+# --- API KEY HANDLING ---
+try:
+    api_key = st.secrets["openai_api_key"]
+    logger.info("API key loaded from Streamlit secrets")
+except (FileNotFoundError, KeyError):
+    api_key = os.environ.get("OPENAI_API_KEY", "")
+    if api_key:
+        logger.info("API key loaded from environment variables")
+    else:
+        logger.warning("No OpenAI API key found")
 
 # Track available modules
 AVAILABLE_MODULES = {
@@ -66,24 +40,22 @@ AVAILABLE_MODULES = {
     'requests': False,
     'ocr': False,
     'xlsx_writer': False,
-    'ai_api': False      # New module for AI API functionality
+    'ai_api': False
 }
 
-# Try importing pandas
+# Check if modules are available
 try:
     import pandas as pd
     AVAILABLE_MODULES['pandas'] = True
 except ImportError:
     logger.warning("pandas module not available")
 
-# Try importing numpy
 try:
     import numpy as np
     AVAILABLE_MODULES['numpy'] = True
 except ImportError:
     logger.warning("numpy module not available")
 
-# Try importing plotly
 try:
     import plotly.express as px
     import plotly.graph_objects as go
@@ -91,28 +63,24 @@ try:
 except ImportError:
     logger.warning("plotly module not available")
 
-# Try importing PIL
 try:
     from PIL import Image
     AVAILABLE_MODULES['pillow'] = True
 except ImportError:
     logger.warning("PIL module not available")
 
-# Try importing requests - will be needed for direct API calls
 try:
     import requests
     AVAILABLE_MODULES['requests'] = True
 except ImportError:
     logger.warning("requests module not available")
 
-# Try importing xlsxwriter
 try:
     import xlsxwriter
     AVAILABLE_MODULES['xlsx_writer'] = True
 except ImportError:
     logger.warning("xlsxwriter module not available")
 
-# Try importing OCR modules - these will fail if not installed
 try:
     import pytesseract
     import pdf2image
@@ -120,44 +88,19 @@ try:
 except ImportError:
     logger.warning("OCR modules not available")
 
-# Try OpenAI API integration with direct HTTP requests
-api_key = None
-try:
-    # Try to get from streamlit secrets directly - case sensitive!
-    api_key = st.secrets.get("openai_api_key", None)
-    if api_key:
-        logger.info("Found openai_api_key in Streamlit secrets")
-        AVAILABLE_MODULES['ai_api'] = True
-    else:
-        # Try alternate capitalizations
-        api_key = st.secrets.get("OPENAI_API_KEY", None)
-        if api_key:
-            logger.info("Found OPENAI_API_KEY in Streamlit secrets")
-            AVAILABLE_MODULES['ai_api'] = True
-        else:
-            # Last resort - try environment variable
-            api_key = os.environ.get("OPENAI_API_KEY", None)
-            if api_key:
-                logger.info("Found OPENAI_API_KEY in environment variables")
-                AVAILABLE_MODULES['ai_api'] = True
-            else:
-                logger.warning("OpenAI API key not found in any location")
-except Exception as e:
-    logger.error(f"Error accessing OpenAI API key: {str(e)}")
-    api_key = None
-    
-# Debug output to console
-if api_key:
-    logger.info(f"API key found: {api_key[:5]}...{api_key[-4:]}")
+# Check if API is available (based on API key and requests module)
+if api_key and AVAILABLE_MODULES['requests']:
+    AVAILABLE_MODULES['ai_api'] = True
+    logger.info("AI API module is available")
 else:
-    logger.warning("No API key found")
+    logger.warning("AI API is not available - missing API key or requests module")
 
-# Try importing local modules - use safe imports
+# Try importing local modules
 try:
     import ocr_processor
     import data_analysis
     import import_template
-    import ai_analysis  # New module for AI-specific analysis functions
+    import ai_analysis  # AI-specific analysis functions
     HAS_LOCAL_MODULES = True
     logger.info("Successfully imported local modules")
 except ImportError as e:
@@ -176,6 +119,9 @@ if 'current_product' not in st.session_state:
 
 if 'ai_insights' not in st.session_state:
     st.session_state.ai_insights = {}
+
+if 'ai_api_calls' not in st.session_state:
+    st.session_state.ai_api_calls = 0
 
 # Example preloaded data
 EXAMPLE_DATA = {
@@ -250,255 +196,231 @@ st.set_page_config(
     layout="wide"
 )
 
-# Add AI analysis functions if the OpenAI module is available
-if AVAILABLE_MODULES['ai_api']:
-    def analyze_with_ai(text, analysis_type='sentiment'):
-        """
-        Analyze text using OpenAI API
-        
-        Parameters:
-        - text: The text to analyze
-        - analysis_type: Type of analysis to perform
-        
-        Returns:
-        - Dictionary with analysis results
-        """
-        global api_key
-        
-        try:
-            if not api_key:
-                logger.warning("OpenAI API key not available for analysis")
-                return {"success": False, "error": "API key not available"}
-                
-            prompt = ""
-            if analysis_type == 'sentiment':
-                prompt = f"""Analyze the sentiment of this Amazon review for a medical device. 
-                Focus on identifying key factors that influence the customer's purchase decision 
-                and satisfaction. Extract specific feedback about product features, quality, 
-                packaging, and usability. Classify the sentiment as positive, negative, or neutral.
-                
-                Review: {text}
-                """
-            elif analysis_type == 'listing_optimization':
-                prompt = f"""Analyze this Amazon medical device listing text and identify 
-                specific improvements to increase conversion rate and sales. Focus on:
-                1. SEO optimization for Amazon's A9 algorithm
-                2. Clarity of features and benefits
-                3. Competitive differentiation
-                4. Customer pain points addressed
-                5. Social proof elements
-                
-                Listing: {text}
-                """
-            elif analysis_type == 'return_analysis':
-                prompt = f"""Analyze this return reason for an Amazon medical device 
-                product to identify actionable improvements. Determine if the return 
-                relates to:
-                1. Product design or quality issues
-                2. Customer expectation mismatch
-                3. Listing accuracy problems (images, description)
-                4. Sizing or fit issues
-                5. Packaging or delivery problems
-                
-                Return reason: {text}
-                """
-            elif analysis_type == 'image_feedback':
-                prompt = f"""Review this description of a product image for an Amazon 
-                medical device listing. Identify improvements to make the image more 
-                effective for conversion, including:
-                1. Clarity and professional appearance
-                2. Feature demonstration
-                3. Size/scale reference
-                4. Use case visualization
-                5. Competitive differentiation
-                
-                Image description: {text}
-                """
-            
-            messages = [
-                {"role": "system", "content": "You are an expert Amazon listing optimization specialist who helps medical device companies maximize their e-commerce sales and minimize returns."},
-                {"role": "user", "content": prompt}
-            ]
-            
-            if not AVAILABLE_MODULES.get('requests', False):
-                logger.error("requests module is required for API calls")
-                return {"success": False, "error": "requests module not available"}
-            
-            # API call with direct request to OpenAI
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}"
-            }
-            
-            payload = {
-                "model": "gpt-4o",
-                "messages": messages,
-                "max_tokens": 750,
-                "temperature": 0.2
-            }
-            
-            response = requests.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers=headers,
-                data=json.dumps(payload),
-                timeout=30
-            )
-            
-            if response.status_code == 200:
-                result = response.json()["choices"][0]["message"]["content"]
-                return {"success": True, "result": result}
-            else:
-                logger.error(f"API error: {response.status_code} - {response.text}")
-                return {"success": False, "error": f"API error: {response.status_code}"}
-                
-        except Exception as e:
-            logger.error(f"AI analysis error: {str(e)}")
-            return {"success": False, "error": str(e)}
+# --- OPENAI API FUNCTIONS ---
+def call_openai_api(messages, temperature=0.7, max_tokens=1024, model="gpt-4o"):
+    """Call OpenAI API with the provided messages"""
+    if not api_key:
+        logger.error("API Key not found. Please set it up in your environment.")
+        return {"success": False, "error": "API Key not configured."}
     
-    def analyze_listing_optimization(product_info):
-        """
-        Use AI to analyze and provide recommendations for Amazon listing optimization
-        
-        Parameters:
-        - product_info: Dictionary with product details
-        
-        Returns:
-        - Dictionary with optimization recommendations
-        """
-        try:
-            prompt = f"""Analyze this Amazon medical device product and provide actionable 
-            recommendations to optimize the listing for higher conversion rates and reduced returns.
-            
-            Product name: {product_info.get('name', 'Unknown')}
-            Category: {product_info.get('category', 'Medical Device')}
-            Description: {product_info.get('description', '')}
-            30-Day Return Rate: {product_info.get('return_rate_30d', 'N/A')}%
-            Star Rating: {product_info.get('star_rating', 'N/A')}
-            
-            Provide the following:
-            1. Title optimization recommendations (for better CTR and keyword relevance)
-            2. Bullet points strategy (highlight key benefits and features)
-            3. Description improvements (storytelling and problem-solution format)
-            4. Image optimization suggestions (specific shots and demonstrations needed)
-            5. Keywords to target for this specific medical device
-            6. A+ Content recommendations (if applicable)
-            7. Common customer questions to address proactively
-            """
-            
-            messages = [
-                {"role": "system", "content": "You are an expert Amazon listing optimization specialist who helps medical device companies maximize their e-commerce sales and minimize returns."},
-                {"role": "user", "content": prompt}
-            ]
-            
-            # API call with direct request to OpenAI
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}"
-            }
-            
-            payload = {
-                "model": "gpt-4o",
-                "messages": messages,
-                "max_tokens": 1000,
-                "temperature": 0.2
-            }
-            
-            response = requests.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers=headers,
-                data=json.dumps(payload),
-                timeout=30
-            )
-            
-            if response.status_code == 200:
-                result = response.json()["choices"][0]["message"]["content"]
-                return {"success": True, "result": result}
-            else:
-                logger.error(f"API error: {response.status_code} - {response.text}")
-                return {"success": False, "error": f"API error: {response.status_code}"}
-            
-        except Exception as e:
-            logger.error(f"Listing optimization error: {str(e)}")
-            return {"success": False, "error": str(e)}
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}"
+    }
     
-    def generate_improvement_recommendations(product_info, reviews_data, returns_data):
-        """
-        Generate AI-powered recommendations for product improvements based on reviews and returns
+    try:
+        payload = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens
+        }
         
-        Parameters:
-        - product_info: Dictionary with product details
-        - reviews_data: List of product reviews
-        - returns_data: List of return reasons
+        response = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers=headers,
+            data=json.dumps(payload),
+            timeout=30
+        )
         
-        Returns:
-        - Dictionary with recommendations
-        """
-        try:
-            # Prepare the data for analysis
-            reviews_text = "\n".join([f"Rating: {r.get('rating', 'N/A')} - {r.get('review_text', '')}" 
-                                      for r in reviews_data[:20]])  # Limit to 20 reviews to avoid token limits
+        # Increment API call counter
+        if 'ai_api_calls' in st.session_state:
+            st.session_state.ai_api_calls += 1
+        
+        # If successful
+        if response.status_code == 200:
+            return {
+                "success": True,
+                "result": response.json()["choices"][0]["message"]["content"]
+            }
+        else:
+            return {
+                "success": False,
+                "error": f"Error: {response.status_code} - {response.text}"
+            }
+    
+    except Exception as e:
+        logger.error(f"API call error: {str(e)}")
+        return {"success": False, "error": f"Error: {str(e)}"}
+
+def test_openai_api():
+    """Test if the OpenAI API key works with a minimal request"""
+    if not api_key or not AVAILABLE_MODULES['requests']:
+        return False
+    
+    messages = [{"role": "user", "content": "Hello, this is a test."}]
+    
+    try:
+        result = call_openai_api(
+            messages=messages,
+            temperature=0.5,
+            max_tokens=10
+        )
+        
+        return result.get("success", False)
+    except Exception as e:
+        logger.error(f"Error testing OpenAI API: {str(e)}")
+        return False
+
+def analyze_with_ai(text, analysis_type='sentiment'):
+    """
+    Analyze text using OpenAI API
+    
+    Parameters:
+    - text: The text to analyze
+    - analysis_type: Type of analysis to perform
+    
+    Returns:
+    - Dictionary with analysis results
+    """
+    try:
+        prompt = ""
+        if analysis_type == 'sentiment':
+            prompt = f"""Analyze the sentiment of this Amazon review for a medical device. 
+            Focus on identifying key factors that influence the customer's purchase decision 
+            and satisfaction. Extract specific feedback about product features, quality, 
+            packaging, and usability. Classify the sentiment as positive, negative, or neutral.
             
-            returns_text = "\n".join([f"Return reason: {r.get('return_reason', '')}" 
-                                     for r in returns_data[:20]])  # Limit to 20 return reasons
-            
-            prompt = f"""As an Amazon listing optimization specialist for medical devices, analyze the following 
-            product data and provide actionable recommendations:
-            
-            Product: {product_info.get('name', 'Unknown')}
-            Category: {product_info.get('category', 'Medical Device')}
-            30-Day Return Rate: {product_info.get('return_rate_30d', 'N/A')}%
-            Star Rating: {product_info.get('star_rating', 'N/A')}
-            
-            Customer Reviews:
-            {reviews_text}
-            
-            Return Reasons:
-            {returns_text}
-            
-            Please provide:
-            1. Top 3-5 product improvement recommendations based on customer feedback
-            2. Specific listing improvements to reduce return rate
-            3. New or improved image recommendations based on customer confusion
-            4. Keywords and features to emphasize based on positive reviews
-            5. Features that need better explanation in the listing
-            6. Competitive differentiators to highlight more prominently
+            Review: {text}
             """
+        elif analysis_type == 'listing_optimization':
+            prompt = f"""Analyze this Amazon medical device listing text and identify 
+            specific improvements to increase conversion rate and sales. Focus on:
+            1. SEO optimization for Amazon's A9 algorithm
+            2. Clarity of features and benefits
+            3. Competitive differentiation
+            4. Customer pain points addressed
+            5. Social proof elements
             
-            messages = [
-                {"role": "system", "content": "You are an expert Amazon listing optimization specialist who helps medical device companies maximize their e-commerce sales and minimize returns."},
-                {"role": "user", "content": prompt}
-            ]
+            Listing: {text}
+            """
+        elif analysis_type == 'return_analysis':
+            prompt = f"""Analyze this return reason for an Amazon medical device 
+            product to identify actionable improvements. Determine if the return 
+            relates to:
+            1. Product design or quality issues
+            2. Customer expectation mismatch
+            3. Listing accuracy problems (images, description)
+            4. Sizing or fit issues
+            5. Packaging or delivery problems
             
-            # API call with direct request to OpenAI
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}"
-            }
+            Return reason: {text}
+            """
+        elif analysis_type == 'image_feedback':
+            prompt = f"""Review this description of a product image for an Amazon 
+            medical device listing. Identify improvements to make the image more 
+            effective for conversion, including:
+            1. Clarity and professional appearance
+            2. Feature demonstration
+            3. Size/scale reference
+            4. Use case visualization
+            5. Competitive differentiation
             
-            payload = {
-                "model": "gpt-4o",
-                "messages": messages,
-                "max_tokens": 1200,
-                "temperature": 0.2
-            }
-            
-            response = requests.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers=headers,
-                data=json.dumps(payload),
-                timeout=30
-            )
-            
-            if response.status_code == 200:
-                result = response.json()["choices"][0]["message"]["content"]
-                return {"success": True, "result": result}
-            else:
-                logger.error(f"API error: {response.status_code} - {response.text}")
-                return {"success": False, "error": f"API error: {response.status_code}"}
-            
-        except Exception as e:
-            logger.error(f"Recommendation generation error: {str(e)}")
-            return {"success": False, "error": str(e)}
+            Image description: {text}
+            """
+        
+        messages = [
+            {"role": "system", "content": "You are an expert Amazon listing optimization specialist who helps medical device companies maximize their e-commerce sales and minimize returns."},
+            {"role": "user", "content": prompt}
+        ]
+        
+        return call_openai_api(messages, temperature=0.2, max_tokens=750)
+    except Exception as e:
+        logger.error(f"AI analysis error: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+def analyze_listing_optimization(product_info):
+    """
+    Use AI to analyze and provide recommendations for Amazon listing optimization
+    
+    Parameters:
+    - product_info: Dictionary with product details
+    
+    Returns:
+    - Dictionary with optimization recommendations
+    """
+    try:
+        prompt = f"""Analyze this Amazon medical device product and provide actionable 
+        recommendations to optimize the listing for higher conversion rates and reduced returns.
+        
+        Product name: {product_info.get('name', 'Unknown')}
+        Category: {product_info.get('category', 'Medical Device')}
+        Description: {product_info.get('description', '')}
+        30-Day Return Rate: {product_info.get('return_rate_30d', 'N/A')}%
+        Star Rating: {product_info.get('star_rating', 'N/A')}
+        
+        Provide the following:
+        1. Title optimization recommendations (for better CTR and keyword relevance)
+        2. Bullet points strategy (highlight key benefits and features)
+        3. Description improvements (storytelling and problem-solution format)
+        4. Image optimization suggestions (specific shots and demonstrations needed)
+        5. Keywords to target for this specific medical device
+        6. A+ Content recommendations (if applicable)
+        7. Common customer questions to address proactively
+        """
+        
+        messages = [
+            {"role": "system", "content": "You are an expert Amazon listing optimization specialist who helps medical device companies maximize their e-commerce sales and minimize returns."},
+            {"role": "user", "content": prompt}
+        ]
+        
+        return call_openai_api(messages, temperature=0.2, max_tokens=1000)
+    except Exception as e:
+        logger.error(f"Listing optimization error: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+def generate_improvement_recommendations(product_info, reviews_data, returns_data):
+    """
+    Generate AI-powered recommendations for product improvements based on reviews and returns
+    
+    Parameters:
+    - product_info: Dictionary with product details
+    - reviews_data: List of product reviews
+    - returns_data: List of return reasons
+    
+    Returns:
+    - Dictionary with recommendations
+    """
+    try:
+        # Prepare the data for analysis
+        reviews_text = "\n".join([f"Rating: {r.get('rating', 'N/A')} - {r.get('review_text', '')}" 
+                                  for r in reviews_data[:20]])  # Limit to 20 reviews to avoid token limits
+        
+        returns_text = "\n".join([f"Return reason: {r.get('return_reason', '')}" 
+                                 for r in returns_data[:20]])  # Limit to 20 return reasons
+        
+        prompt = f"""As an Amazon listing optimization specialist for medical devices, analyze the following 
+        product data and provide actionable recommendations:
+        
+        Product: {product_info.get('name', 'Unknown')}
+        Category: {product_info.get('category', 'Medical Device')}
+        30-Day Return Rate: {product_info.get('return_rate_30d', 'N/A')}%
+        Star Rating: {product_info.get('star_rating', 'N/A')}
+        
+        Customer Reviews:
+        {reviews_text}
+        
+        Return Reasons:
+        {returns_text}
+        
+        Please provide:
+        1. Top 3-5 product improvement recommendations based on customer feedback
+        2. Specific listing improvements to reduce return rate
+        3. New or improved image recommendations based on customer confusion
+        4. Keywords and features to emphasize based on positive reviews
+        5. Features that need better explanation in the listing
+        6. Competitive differentiators to highlight more prominently
+        """
+        
+        messages = [
+            {"role": "system", "content": "You are an expert Amazon listing optimization specialist who helps medical device companies maximize their e-commerce sales and minimize returns."},
+            {"role": "user", "content": prompt}
+        ]
+        
+        return call_openai_api(messages, temperature=0.2, max_tokens=1200)
+    except Exception as e:
+        logger.error(f"Recommendation generation error: {str(e)}")
+        return {"success": False, "error": str(e)}
 
 def main():
     """Main application entry point."""
@@ -530,9 +452,6 @@ def main():
             st.success("✅ Connected to OpenAI API (GPT-4o)")
             
             # Show a mini usage tracker
-            if 'ai_api_calls' not in st.session_state:
-                st.session_state.ai_api_calls = 0
-            
             st.metric("AI API Calls", st.session_state.ai_api_calls)
             
             # Add a test button
@@ -550,14 +469,18 @@ def main():
             with st.expander("Debug API Connection"):
                 temp_key = st.text_input("Enter API Key for testing", type="password")
                 if temp_key and st.button("Test Key"):
+                    # Store temporarily
                     global api_key
-                    api_key = temp_key
+                    temp_api_key = api_key  # Save current key
+                    api_key = temp_key      # Test new key
+                    
                     with st.spinner("Testing API connection..."):
                         if test_openai_api():
                             st.success("✅ Key works! Use this key in your Streamlit settings.")
                         else:
                             st.error("❌ Key doesn't work. Check if it's valid.")
-    
+                        
+                    api_key = temp_api_key  # Restore original key
     
     # Main content tabs
     tabs = st.tabs(["Import", "Analyze", "Listing Optimization", "AI Insights", "Help"])
@@ -929,10 +852,6 @@ def render_file_upload():
                                 analysis_type = "image_feedback"
                             
                             if analysis_type:
-                                # Increment the API call counter
-                                if 'ai_api_calls' in st.session_state:
-                                    st.session_state.ai_api_calls += 1
-                                
                                 result = analyze_with_ai(processed_docs[0]["text"], analysis_type)
                                 if result["success"]:
                                     st.subheader("AI Analysis Results")
@@ -1206,10 +1125,6 @@ def render_product_selection():
                 if st.session_state.current_product:
                     with st.spinner("Performing AI-enhanced analysis..."):
                         try:
-                            # Increment the API call counter
-                            if 'ai_api_calls' in st.session_state:
-                                st.session_state.ai_api_calls += 1
-                                
                             # First run standard analysis if not already done
                             if product_info['asin'] not in st.session_state.analysis_results:
                                 analysis_result = f"Analysis for {product_info['name']} ({product_info['asin']})\n\n"
@@ -1316,7 +1231,7 @@ def render_listing_optimization():
     
     # Check if AI is available
     if not AVAILABLE_MODULES['ai_api']:
-        st.warning("OpenAI API is required for listing optimization. Please add your API key to Streamlit secrets.")
+        st.warning("OpenAI API is required for listing optimization. Please add your API key to Streamlit app settings.")
         return
     
     # Tabs for different optimization areas
@@ -1353,94 +1268,9 @@ def render_listing_optimization():
                     st.success("Listing content updated!")
                     st.rerun()
         
-        # Amazon listing score based on key metrics
-        st.markdown("### Listing Quality Score")
-        
-        # Calculate estimated listing quality score (placeholder logic)
-        scores = {}
-        if product_info['description']:
-            # Simple metrics based on description length and content
-            desc = product_info['description']
-            scores["Title Effectiveness"] = min(len(desc.split('\n')[0].split()) * 5, 100) if '\n' in desc else 60
-            scores["Bullet Points"] = min(desc.count('\n') * 10, 100) if desc.count('\n') > 0 else 40
-            scores["Description Quality"] = min(len(desc) / 20, 100)
-            scores["Image Quality"] = 75  # Placeholder
-            scores["Keywords Coverage"] = 65  # Placeholder
-            scores["Q&A Completeness"] = 50  # Placeholder
-            scores["Review Response"] = 40  # Placeholder
-            
-            # Get star rating impact
-            if product_info['star_rating']:
-                scores["Customer Satisfaction"] = min(product_info['star_rating'] * 20, 100)
-            
-            # Get return rate impact
-            if product_info['return_rate_30d'] is not None:
-                scores["Return Rate"] = max(100 - (product_info['return_rate_30d'] * 5), 0)
-        else:
-            # Default scores if no description
-            for metric in LISTING_METRICS:
-                scores[metric] = 50
-        
-        # Display listing quality score with gauge chart
-        if AVAILABLE_MODULES['plotly']:
-            # Calculate overall score
-            overall_score = sum(scores.values()) / len(scores)
-            
-            # Create gauge chart for overall score
-            fig = go.Figure(go.Indicator(
-                mode = "gauge+number",
-                value = overall_score,
-                domain = {'x': [0, 1], 'y': [0, 1]},
-                title = {'text': "Overall Listing Quality"},
-                gauge = {
-                    'axis': {'range': [0, 100]},
-                    'bar': {'color': "royalblue"},
-                    'steps': [
-                        {'range': [0, 40], 'color': "lightcoral"},
-                        {'range': [40, 70], 'color': "khaki"},
-                        {'range': [70, 100], 'color': "lightgreen"}
-                    ],
-                    'threshold': {
-                        'line': {'color': "black", 'width': 4},
-                        'thickness': 0.75,
-                        'value': 80
-                    }
-                }
-            ))
-            
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Display individual metric scores
-            st.markdown("### Listing Metrics")
-            
-            # Create a dataframe for the metrics
-            metric_df = pd.DataFrame({
-                'Metric': list(scores.keys()),
-                'Score': list(scores.values()),
-                'Description': [LISTING_METRICS.get(m, "") for m in scores.keys()]
-            })
-            
-            # Create a bar chart
-            fig = px.bar(
-                metric_df, 
-                x='Metric', 
-                y='Score', 
-                color='Score',
-                color_continuous_scale=["red", "yellow", "green"],
-                range_color=[0, 100],
-                hover_data=['Description'],
-                title="Listing Quality Metrics"
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
-        
         # AI analysis button
         if st.button("Generate AI Optimization Recommendations", type="primary"):
             with st.spinner("Analyzing listing with AI..."):
-                # Increment the API call counter
-                if 'ai_api_calls' in st.session_state:
-                    st.session_state.ai_api_calls += 1
-                
                 listing_optimization = analyze_listing_optimization(product_info)
                 if listing_optimization.get('success', False):
                     # Store in AI insights
@@ -1457,7 +1287,7 @@ def render_listing_optimization():
                     st.markdown(listing_optimization.get('result'))
                 else:
                     st.error(f"AI analysis failed: {listing_optimization.get('error', 'Unknown error')}")
-    
+
     # Tab 2: Title Optimization
     with tabs[1]:
         st.markdown("### Amazon Title Optimization")
@@ -1520,660 +1350,6 @@ def render_listing_optimization():
                     st.info("Generate full listing recommendations to see title optimization suggestions")
             else:
                 st.info("Run AI Optimization to get title recommendations")
-        
-        # Generate title button
-        if st.button("Generate Optimized Title", key="title_button"):
-            with st.spinner("Generating optimized title..."):
-                # Increment the API call counter
-                if 'ai_api_calls' in st.session_state:
-                    st.session_state.ai_api_calls += 1
-                
-                prompt = f"""Create an optimized Amazon title for this medical device product:
-                
-                Product: {product_info['name']}
-                Category: {product_info['category']}
-                Current Title: {current_title}
-                
-                Follow Amazon's best practices:
-                - Maximum 200 characters
-                - Include key search terms
-                - Format: Brand + Model + Type + Key Features/Benefits
-                - No promotional language like "best" or "top-rated"
-                - No special characters beyond basic punctuation
-                
-                Provide just the optimized title text.
-                """
-                
-                messages = [
-                    {"role": "system", "content": "You are an expert Amazon listing optimization specialist for medical devices."},
-                    {"role": "user", "content": prompt}
-                ]
-                
-                try:
-                    # Check which version of the OpenAI SDK is being used
-                    if 'client' in globals():  # New SDK (v1.0.0+)
-                        response = client.chat.completions.create(
-                            model="gpt-4o",
-                            messages=messages,
-                            max_tokens=200,
-                            temperature=0.2
-                        )
-                        result = response.choices[0].message.content
-                    else:  # Legacy SDK (<v1.0.0)
-                        response = openai.ChatCompletion.create(
-                            model="gpt-4o",
-                            messages=messages,
-                            max_tokens=200,
-                            temperature=0.2
-                        )
-                        result = response.choices[0].message.content
-                    
-                    st.success("Optimized title generated!")
-                    st.markdown("### AI-Generated Title")
-                    st.markdown(result)
-                    
-                    # Display length analysis
-                    title_length = len(result)
-                    if title_length < 80:
-                        st.warning(f"Title length: {title_length}/200 characters - Consider adding more relevant keywords")
-                    elif title_length > 180:
-                        st.warning(f"Title length: {title_length}/200 characters - Getting close to the limit")
-                    else:
-                        st.success(f"Title length: {title_length}/200 characters - Good length")
-                except Exception as e:
-                    st.error(f"Error generating title: {str(e)}")
-    
-    # Tab 3: Bullet Points
-    with tabs[2]:
-        st.markdown("### Bullet Points Optimization")
-        st.markdown("""
-        Effective bullet points should:
-        - Focus on key benefits (not just features)
-        - Address customer pain points
-        - Be concise but descriptive
-        - Include relevant keywords
-        - Address common questions/concerns
-        """)
-        
-        # Extract current bullet points
-        bullet_points = []
-        if product_info['description']:
-            lines = product_info['description'].split('\n')
-            in_bullets = False
-            for line in lines:
-                if line.strip().startswith('•') or line.strip().startswith('-') or line.strip().startswith('*'):
-                    bullet_points.append(line.strip())
-                    in_bullets = True
-                elif in_bullets and line.strip() and not line.strip().startswith('•') and not line.strip().startswith('-') and not line.strip().startswith('*'):
-                    in_bullets = False
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("#### Current Bullet Points")
-            if bullet_points:
-                for bp in bullet_points:
-                    st.markdown(bp)
-            else:
-                st.info("No bullet points detected in the product description")
-        
-        with col2:
-            st.markdown("#### Optimized Bullet Points")
-            
-            # Get AI recommendations for bullet points if available
-            if product_info['asin'] in st.session_state.ai_insights and 'listing_optimization' in st.session_state.ai_insights[product_info['asin']]['insights']:
-                listing_insights = st.session_state.ai_insights[product_info['asin']]['insights']['listing_optimization']
-                
-                # Try to extract bullet point recommendations
-                bullet_section = ""
-                if "Bullet" in listing_insights:
-                    lines = listing_insights.split('\n')
-                    in_bullet_section = False
-                    for line in lines:
-                        if "Bullet" in line:
-                            in_bullet_section = True
-                            bullet_section += line + "\n"
-                        elif in_bullet_section and line.strip() and not any(section in line for section in ["Title", "Description", "Image", "Keyword"]):
-                            bullet_section += line + "\n"
-                        elif in_bullet_section and any(section in line for section in ["Title", "Description", "Image", "Keyword"]):
-                            in_bullet_section = False
-                
-                if bullet_section:
-                    st.markdown(bullet_section)
-                else:
-                    st.info("Generate full listing recommendations to see bullet point optimization suggestions")
-            else:
-                st.info("Run AI Optimization to get bullet point recommendations")
-        
-        # Generate bullet points button
-        if st.button("Generate Optimized Bullet Points", key="bullet_button"):
-            with st.spinner("Generating optimized bullet points..."):
-                # Increment the API call counter
-                if 'ai_api_calls' in st.session_state:
-                    st.session_state.ai_api_calls += 1
-                
-                prompt = f"""Create 5 optimized bullet points for this Amazon medical device listing:
-                
-                Product: {product_info['name']}
-                Category: {product_info['category']}
-                Description: {product_info['description']}
-                
-                Current Bullet Points:
-                {chr(10).join(bullet_points) if bullet_points else "None provided"}
-                
-                Follow Amazon's best practices:
-                - Focus on benefits, not just features
-                - Address customer pain points and questions
-                - Include relevant keywords
-                - Start with capital letters
-                - Keep each point under 200 characters
-                - Format as complete sentences
-                - No promotional language like "best" or "top-rated"
-                
-                Include one bullet point specifically addressing quality/durability and one addressing comfort/ease of use.
-                """
-                
-                messages = [
-                    {"role": "system", "content": "You are an expert Amazon listing optimization specialist for medical devices."},
-                    {"role": "user", "content": prompt}
-                ]
-                
-                try:
-                    # Check which version of the OpenAI SDK is being used
-                    if 'client' in globals():  # New SDK (v1.0.0+)
-                        response = client.chat.completions.create(
-                            model="gpt-4o",
-                            messages=messages,
-                            max_tokens=500,
-                            temperature=0.2
-                        )
-                        result = response.choices[0].message.content
-                    else:  # Legacy SDK (<v1.0.0)
-                        response = openai.ChatCompletion.create(
-                            model="gpt-4o",
-                            messages=messages,
-                            max_tokens=500,
-                            temperature=0.2
-                        )
-                        result = response.choices[0].message.content
-                    
-                    st.success("Optimized bullet points generated!")
-                    st.markdown("### AI-Generated Bullet Points")
-                    st.markdown(result)
-                except Exception as e:
-                    st.error(f"Error generating bullet points: {str(e)}")
-    
-    # Tab 4: Description
-    with tabs[3]:
-        st.markdown("### Product Description Optimization")
-        st.markdown("""
-        An effective Amazon product description should:
-        - Expand on features and benefits
-        - Use HTML formatting for readability
-        - Include keywords naturally
-        - Address customer objections
-        - Provide use cases and scenarios
-        """)
-        
-        # Extract current description (excluding title and bullets)
-        current_description = ""
-        if product_info['description']:
-            lines = product_info['description'].split('\n')
-            if len(lines) > 1:
-                # Skip the first line (title) and any bullet points
-                in_description = False
-                for line in lines[1:]:
-                    if not line.strip().startswith('•') and not line.strip().startswith('-') and not line.strip().startswith('*') and line.strip():
-                        in_description = True
-                        current_description += line + "\n"
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("#### Current Description")
-            st.text_area("Current Description", value=current_description, height=300, disabled=True)
-        
-        with col2:
-            st.markdown("#### Optimized Description")
-            
-            # Get AI recommendations for description if available
-            if product_info['asin'] in st.session_state.ai_insights and 'listing_optimization' in st.session_state.ai_insights[product_info['asin']]['insights']:
-                listing_insights = st.session_state.ai_insights[product_info['asin']]['insights']['listing_optimization']
-                
-                # Try to extract description recommendations
-                description_section = ""
-                if "Description" in listing_insights:
-                    lines = listing_insights.split('\n')
-                    in_description_section = False
-                    for line in lines:
-                        if "Description" in line:
-                            in_description_section = True
-                            description_section += line + "\n"
-                        elif in_description_section and line.strip() and not any(section in line for section in ["Title", "Bullet", "Image", "Keyword"]):
-                            description_section += line + "\n"
-                        elif in_description_section and any(section in line for section in ["Title", "Bullet", "Image", "Keyword"]):
-                            in_description_section = False
-                
-                if description_section:
-                    st.markdown(description_section)
-                else:
-                    st.info("Generate full listing recommendations to see description optimization suggestions")
-            else:
-                st.info("Run AI Optimization to get description recommendations")
-        
-        # Generate description button
-        if st.button("Generate Optimized Description", key="description_button"):
-            with st.spinner("Generating optimized description..."):
-                # Increment the API call counter
-                if 'ai_api_calls' in st.session_state:
-                    st.session_state.ai_api_calls += 1
-                
-                prompt = f"""Create an optimized Amazon product description for this medical device:
-                
-                Product: {product_info['name']}
-                Category: {product_info['category']}
-                Current Description: {current_description}
-                
-                Follow Amazon's best practices:
-                - Write in HTML format with paragraph tags (<p>) and line breaks
-                - Expand on features and benefits beyond the bullet points
-                - Include keywords naturally throughout the text
-                - Address potential customer questions and objections
-                - Describe specific use cases and scenarios
-                - Highlight quality, comfort, ease of use, and durability
-                - Avoid excessive capitalization and promotional language
-                
-                The description should be 3-5 paragraphs and include HTML formatting.
-                """
-                
-                messages = [
-                    {"role": "system", "content": "You are an expert Amazon listing optimization specialist for medical devices."},
-                    {"role": "user", "content": prompt}
-                ]
-                
-                try:
-                    # Check which version of the OpenAI SDK is being used
-                    if 'client' in globals():  # New SDK (v1.0.0+)
-                        response = client.chat.completions.create(
-                            model="gpt-4o",
-                            messages=messages,
-                            max_tokens=800,
-                            temperature=0.2
-                        )
-                        result = response.choices[0].message.content
-                    else:  # Legacy SDK (<v1.0.0)
-                        response = openai.ChatCompletion.create(
-                            model="gpt-4o",
-                            messages=messages,
-                            max_tokens=800,
-                            temperature=0.2
-                        )
-                        result = response.choices[0].message.content
-                    
-                    st.success("Optimized description generated!")
-                    st.markdown("### AI-Generated Description")
-                    st.code(result, language="html")
-                    
-                    # Display preview
-                    st.markdown("### Preview")
-                    st.markdown(result, unsafe_allow_html=True)
-                except Exception as e:
-                    st.error(f"Error generating description: {str(e)}")
-    
-    # Tab 5: Keywords
-    with tabs[4]:
-        st.markdown("### Keyword Optimization")
-        st.markdown("""
-        Effective Amazon keywords strategy:
-        - Include relevant search terms customers use
-        - Focus on long-tail keywords for medical devices
-        - Include synonyms and related terms
-        - Add appropriate medical terminology
-        - Consider customer language (not just technical terms)
-        """)
-        
-        # Get AI recommendations for keywords if available
-        if product_info['asin'] in st.session_state.ai_insights and 'listing_optimization' in st.session_state.ai_insights[product_info['asin']]['insights']:
-            listing_insights = st.session_state.ai_insights[product_info['asin']]['insights']['listing_optimization']
-            
-            # Try to extract keyword recommendations
-            keyword_section = ""
-            if "Keyword" in listing_insights:
-                lines = listing_insights.split('\n')
-                in_keyword_section = False
-                for line in lines:
-                    if "Keyword" in line:
-                        in_keyword_section = True
-                        keyword_section += line + "\n"
-                    elif in_keyword_section and line.strip() and not any(section in line for section in ["Title", "Bullet", "Description", "Image"]):
-                        keyword_section += line + "\n"
-                    elif in_keyword_section and any(section in line for section in ["Title", "Bullet", "Description", "Image"]):
-                        in_keyword_section = False
-            
-            if keyword_section:
-                st.markdown("#### Keyword Recommendations")
-                st.markdown(keyword_section)
-            else:
-                st.info("Generate full listing recommendations to see keyword suggestions")
-        else:
-            st.info("Run AI Optimization to get keyword recommendations")
-        
-        # Generate keywords button
-        if st.button("Generate Keyword Recommendations", key="keyword_button"):
-            with st.spinner("Generating keyword recommendations..."):
-                # Increment the API call counter
-                if 'ai_api_calls' in st.session_state:
-                    st.session_state.ai_api_calls += 1
-                
-                prompt = f"""Generate keyword recommendations for this Amazon medical device listing:
-                
-                Product: {product_info['name']}
-                Category: {product_info['category']}
-                Description: {product_info['description']}
-                
-                Please provide:
-                1. Primary keywords (5-7 most important search terms)
-                2. Secondary keywords (8-10 additional relevant terms)
-                3. Long-tail keyword phrases (5-7 specific search phrases)
-                4. Backend keywords (for Amazon backend search terms field)
-                5. Competitor keywords (terms used by top competitors)
-                
-                Focus on medical terminology, symptoms, conditions, and use cases relevant to this product.
-                """
-                
-                messages = [
-                    {"role": "system", "content": "You are an expert Amazon SEO specialist for medical devices with deep knowledge of search patterns and keyword optimization."},
-                    {"role": "user", "content": prompt}
-                ]
-                
-                try:
-                    # Check which version of the OpenAI SDK is being used
-                    if 'client' in globals():  # New SDK (v1.0.0+)
-                        response = client.chat.completions.create(
-                            model="gpt-4o",
-                            messages=messages,
-                            max_tokens=800,
-                            temperature=0.2
-                        )
-                        result = response.choices[0].message.content
-                    else:  # Legacy SDK (<v1.0.0)
-                        response = openai.ChatCompletion.create(
-                            model="gpt-4o",
-                            messages=messages,
-                            max_tokens=800,
-                            temperature=0.2
-                        )
-                        result = response.choices[0].message.content
-                    
-                    st.success("Keyword recommendations generated!")
-                    st.markdown("### AI-Generated Keywords")
-                    st.markdown(result)
-                except Exception as e:
-                    st.error(f"Error generating keywords: {str(e)}")
-    
-    # Tab 6: Images
-    with tabs[5]:
-        st.markdown("### Image Optimization")
-        st.markdown("""
-        Amazon product image best practices:
-        - Main image with white background
-        - Multiple images showing different angles
-        - In-use/lifestyle images
-        - Size reference images
-        - Feature highlight images
-        - Comparison images
-        - Packaging images
-        """)
-        
-        # Get AI recommendations for images if available
-        if product_info['asin'] in st.session_state.ai_insights and 'listing_optimization' in st.session_state.ai_insights[product_info['asin']]['insights']:
-            listing_insights = st.session_state.ai_insights[product_info['asin']]['insights']['listing_optimization']
-            
-            # Try to extract image recommendations
-            image_section = ""
-            if "Image" in listing_insights:
-                lines = listing_insights.split('\n')
-                in_image_section = False
-                for line in lines:
-                    if "Image" in line:
-                        in_image_section = True
-                        image_section += line + "\n"
-                    elif in_image_section and line.strip() and not any(section in line for section in ["Title", "Bullet", "Description", "Keyword"]):
-                        image_section += line + "\n"
-                    elif in_image_section and any(section in line for section in ["Title", "Bullet", "Description", "Keyword"]):
-                        in_image_section = False
-            
-            if image_section:
-                st.markdown("#### Image Recommendations")
-                st.markdown(image_section)
-            else:
-                st.info("Generate full listing recommendations to see image optimization suggestions")
-        else:
-            st.info("Run AI Optimization to get image recommendations")
-        
-        # Image checklist
-        st.markdown("### Amazon Image Checklist")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("#### Essential Images")
-            main_image = st.checkbox("Main image with white background", value=False)
-            alternate_angles = st.checkbox("3+ alternate angle images", value=False)
-            product_in_use = st.checkbox("Product in use / lifestyle image", value=False)
-            size_reference = st.checkbox("Size reference image", value=False)
-            features_highlighted = st.checkbox("Features/benefits highlighted", value=False)
-        
-        with col2:
-            st.markdown("#### Enhanced Images")
-            packaging = st.checkbox("Packaging image", value=False)
-            accessories = st.checkbox("Accessories/included items", value=False)
-            instructions = st.checkbox("How-to-use visual guide", value=False)
-            comparison = st.checkbox("Comparison with similar products", value=False)
-            infographic = st.checkbox("Benefits infographic", value=False)
-        
-        # Calculate image score
-        essential_count = sum([main_image, alternate_angles, product_in_use, size_reference, features_highlighted])
-        enhanced_count = sum([packaging, accessories, instructions, comparison, infographic])
-        
-        image_score = (essential_count / 5) * 70 + (enhanced_count / 5) * 30
-        
-        # Display image score
-        st.markdown(f"### Image Score: {image_score:.1f}/100")
-        
-        # Image score gauge
-        if AVAILABLE_MODULES['plotly']:
-            fig = go.Figure(go.Indicator(
-                mode = "gauge+number",
-                value = image_score,
-                domain = {'x': [0, 1], 'y': [0, 1]},
-                title = {'text': "Image Optimization Score"},
-                gauge = {
-                    'axis': {'range': [0, 100]},
-                    'bar': {'color': "royalblue"},
-                    'steps': [
-                        {'range': [0, 40], 'color': "lightcoral"},
-                        {'range': [40, 70], 'color': "khaki"},
-                        {'range': [70, 100], 'color': "lightgreen"}
-                    ],
-                    'threshold': {
-                        'line': {'color': "black", 'width': 4},
-                        'thickness': 0.75,
-                        'value': 80
-                    }
-                }
-            ))
-            
-            st.plotly_chart(fig, use_container_width=True)
-        
-        # Generate image recommendations button
-        if st.button("Generate Image Recommendations", key="image_button"):
-            with st.spinner("Generating image recommendations..."):
-                # Increment the API call counter
-                if 'ai_api_calls' in st.session_state:
-                    st.session_state.ai_api_calls += 1
-                
-                prompt = f"""Create detailed image recommendations for this Amazon medical device listing:
-                
-                Product: {product_info['name']}
-                Category: {product_info['category']}
-                Description: {product_info['description']}
-                
-                Current image score: {image_score}/100
-                
-                Provide the following:
-                1. Specific types of images needed for this product (7-9 total images)
-                2. Key features that should be highlighted in close-ups
-                3. How to show the product in use (lifestyle images)
-                4. Size reference recommendations
-                5. Any infographics that would help explain benefits
-                6. How to visually address common customer questions/concerns
-                
-                Be specific to this type of medical device and focus on images that would increase conversion rate.
-                """
-                
-                messages = [
-                    {"role": "system", "content": "You are an expert Amazon listing optimization specialist for medical devices with expertise in product photography and image optimization."},
-                    {"role": "user", "content": prompt}
-                ]
-                
-                try:
-                    # Check which version of the OpenAI SDK is being used
-                    if 'client' in globals():  # New SDK (v1.0.0+)
-                        response = client.chat.completions.create(
-                            model="gpt-4o",
-                            messages=messages,
-                            max_tokens=800,
-                            temperature=0.2
-                        )
-                        result = response.choices[0].message.content
-                    else:  # Legacy SDK (<v1.0.0)
-                        response = openai.ChatCompletion.create(
-                            model="gpt-4o",
-                            messages=messages,
-                            max_tokens=800,
-                            temperature=0.2
-                        )
-                        result = response.choices[0].message.content
-                    
-                    st.success("Image recommendations generated!")
-                    st.markdown("### AI-Generated Image Recommendations")
-                    st.markdown(result)
-                except Exception as e:
-                    st.error(f"Error generating image recommendations: {str(e)}")
-    
-    # Tab 7: Competitive Analysis
-    with tabs[6]:
-        st.markdown("### Competitive Analysis")
-        
-        # Get competitors data
-        competitors = []
-        if 'competitors' in st.session_state.uploaded_files and product_info['asin'] in st.session_state.uploaded_files['competitors']:
-            competitors = st.session_state.uploaded_files['competitors'][product_info['asin']]
-        
-        if competitors:
-            st.markdown(f"#### {len(competitors)} Competing Products")
-            
-            for comp in competitors:
-                st.markdown(f"- {comp['name']} ([{comp['asin']}](https://www.amazon.com/dp/{comp['asin']}))")
-        else:
-            st.info("No competitors data available. Add competing products in the Manual Entry tab.")
-        
-        # Add competitor form
-        with st.form("add_competitor"):
-            st.markdown("### Add Competitor")
-            comp_asin = st.text_input("Competitor ASIN")
-            comp_name = st.text_input("Competitor Product Name")
-            
-            submitted = st.form_submit_button("Add Competitor")
-            
-            if submitted and comp_asin and comp_name:
-                # Add to competitors list
-                if 'competitors' not in st.session_state.uploaded_files:
-                    st.session_state.uploaded_files['competitors'] = {}
-                
-                if product_info['asin'] not in st.session_state.uploaded_files['competitors']:
-                    st.session_state.uploaded_files['competitors'][product_info['asin']] = []
-                
-                st.session_state.uploaded_files['competitors'][product_info['asin']].append({
-                    "asin": comp_asin,
-                    "name": comp_name,
-                    "product_asin": product_info['asin']
-                })
-                
-                st.success(f"Added competitor: {comp_name}")
-                st.rerun()
-        
-        # Competitive analysis button
-        if st.button("Generate Competitive Analysis", key="competitive_button"):
-            if not competitors:
-                st.warning("Please add competitors first to perform competitive analysis")
-            else:
-                with st.spinner("Generating competitive analysis..."):
-                    # Increment the API call counter
-                    if 'ai_api_calls' in st.session_state:
-                        st.session_state.ai_api_calls += 1
-                    
-                    competitor_list = "\n".join([f"- {comp['name']} (ASIN: {comp['asin']})" for comp in competitors])
-                    
-                    prompt = f"""Perform a competitive analysis for this Amazon medical device and its competitors:
-                    
-                    Your Product: {product_info['name']} (ASIN: {product_info['asin']})
-                    Category: {product_info['category']}
-                    
-                    Competitors:
-                    {competitor_list}
-                    
-                    Provide the following analysis:
-                    1. Competitive positioning strategy
-                    2. Key differentiators to highlight in your listing
-                    3. Price positioning recommendations
-                    4. Feature comparison strategy
-                    5. Unique selling propositions to emphasize
-                    6. Weaknesses of competitors to address
-                    7. Customer pain points competitors aren't solving
-                    
-                    Focus on how to optimize the Amazon listing to stand out from these specific competitors.
-                    """
-                    
-                    messages = [
-                        {"role": "system", "content": "You are an expert Amazon marketplace strategist specializing in competitive analysis and differentiation for medical device products."},
-                        {"role": "user", "content": prompt}
-                    ]
-                    
-                    try:
-                        # Check which version of the OpenAI SDK is being used
-                        if 'client' in globals():  # New SDK (v1.0.0+)
-                            response = client.chat.completions.create(
-                                model="gpt-4o",
-                                messages=messages,
-                                max_tokens=1000,
-                                temperature=0.2
-                            )
-                            result = response.choices[0].message.content
-                        else:  # Legacy SDK (<v1.0.0)
-                            response = openai.ChatCompletion.create(
-                                model="gpt-4o",
-                                messages=messages,
-                                max_tokens=1000,
-                                temperature=0.2
-                            )
-                            result = response.choices[0].message.content
-                        
-                        st.success("Competitive analysis generated!")
-                        st.markdown("### AI-Generated Competitive Analysis")
-                        st.markdown(result)
-                        
-                        # Store in AI insights
-                        if product_info['asin'] not in st.session_state.ai_insights:
-                            st.session_state.ai_insights[product_info['asin']] = {
-                                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                'insights': {}
-                            }
-                        
-                        st.session_state.ai_insights[product_info['asin']]['insights']['competitive_analysis'] = result
-                    except Exception as e:
-                        st.error(f"Error generating competitive analysis: {str(e)}")
 
 def render_ai_insights():
     """Render the AI insights section."""
@@ -2254,11 +1430,6 @@ def render_ai_insights():
                 if 'listing_optimization' in insights['insights']:
                     st.markdown("### Listing Optimization Recommendations")
                     st.markdown(insights['insights']['listing_optimization'])
-                    
-                    # Add competitive analysis if available
-                    if 'competitive_analysis' in insights['insights']:
-                        st.markdown("### Competitive Analysis")
-                        st.markdown(insights['insights']['competitive_analysis'])
                 else:
                     st.info("No listing optimization insights available. Go to the Listing Optimization tab to generate recommendations.")
             
@@ -2269,66 +1440,7 @@ def render_ai_insights():
                     
                     st.markdown(f"### Analysis of {len(review_insights)} Reviews")
                     
-                    # Extract common themes
-                    positive_themes = set()
-                    negative_themes = set()
-                    improvement_suggestions = set()
-                    
-                    # Process all reviews to extract themes
-                    for insight in review_insights:
-                        analysis = insight['analysis']
-                        
-                        # Look for positive feedback
-                        if "positive" in analysis.lower():
-                            # Extract positive themes with simple pattern matching
-                            for line in analysis.split('\n'):
-                                if "positive" in line.lower() and ":" in line:
-                                    theme = line.split(":", 1)[1].strip()
-                                    positive_themes.add(theme)
-                        
-                        # Look for negative feedback
-                        if "negative" in analysis.lower() or "concern" in analysis.lower():
-                            # Extract negative themes with simple pattern matching
-                            for line in analysis.split('\n'):
-                                if any(term in line.lower() for term in ["negative", "concern", "issue"]) and ":" in line:
-                                    theme = line.split(":", 1)[1].strip()
-                                    negative_themes.add(theme)
-                        
-                        # Look for improvement suggestions
-                        if "improve" in analysis.lower() or "suggestion" in analysis.lower():
-                            for line in analysis.split('\n'):
-                                if any(term in line.lower() for term in ["improve", "suggestion", "recommend"]) and ":" in line:
-                                    suggestion = line.split(":", 1)[1].strip()
-                                    improvement_suggestions.add(suggestion)
-                    
-                    # Display themes
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.markdown("#### Common Positive Themes")
-                        if positive_themes:
-                            for theme in positive_themes:
-                                st.success(theme)
-                        else:
-                            st.info("No consistent positive themes identified")
-                    
-                    with col2:
-                        st.markdown("#### Common Negative Themes")
-                        if negative_themes:
-                            for theme in negative_themes:
-                                st.error(theme)
-                        else:
-                            st.info("No consistent negative themes identified")
-                    
-                    st.markdown("#### Improvement Suggestions")
-                    if improvement_suggestions:
-                        for suggestion in improvement_suggestions:
-                            st.info(suggestion)
-                    else:
-                        st.info("No specific improvement suggestions identified")
-                    
                     # Individual review insights
-                    st.markdown("#### Individual Review Analysis")
                     for i, insight in enumerate(review_insights):
                         with st.expander(f"Review {i+1}: {insight['review'][:50]}... (Rating: {insight['rating']})"):
                             st.markdown("**Original Review**")
@@ -2346,131 +1458,14 @@ def render_ai_insights():
                     
                     st.markdown(f"### Analysis of {len(return_insights)} Return Reasons")
                     
-                    # Extract common return categories
-                    quality_issues = []
-                    sizing_issues = []
-                    expectation_issues = []
-                    instruction_issues = []
-                    other_issues = []
-                    
-                    # Process all returns to categorize
-                    for insight in return_insights:
-                        return_reason = insight['return_reason'].lower()
-                        analysis = insight['analysis'].lower()
-                        
-                        if any(term in return_reason or term in analysis for term in ["quality", "defect", "broke", "damaged", "not working"]):
-                            quality_issues.append(insight)
-                        elif any(term in return_reason or term in analysis for term in ["size", "fit", "too small", "too large"]):
-                            sizing_issues.append(insight)
-                        elif any(term in return_reason or term in analysis for term in ["expect", "thought", "not as described", "not like picture"]):
-                            expectation_issues.append(insight)
-                        elif any(term in return_reason or term in analysis for term in ["confus", "instruction", "manual", "how to", "couldn't figure"]):
-                            instruction_issues.append(insight)
-                        else:
-                            other_issues.append(insight)
-                    
-                    # Calculate percentages
-                    total_returns = len(return_insights)
-                    return_categories = {
-                        "Quality Issues": len(quality_issues),
-                        "Sizing Issues": len(sizing_issues),
-                        "Expectation Mismatch": len(expectation_issues),
-                        "Instruction Problems": len(instruction_issues),
-                        "Other Issues": len(other_issues)
-                    }
-                    
-                    # Create visualization
-                    if AVAILABLE_MODULES['plotly']:
-                        fig = px.pie(
-                            names=list(return_categories.keys()),
-                            values=list(return_categories.values()),
-                            title="Return Reasons Distribution"
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-                    
-                    # Display return categories
-                    for category, items in [
-                        ("Quality Issues", quality_issues),
-                        ("Sizing Issues", sizing_issues),
-                        ("Expectation Mismatch", expectation_issues),
-                        ("Instruction Problems", instruction_issues),
-                        ("Other Issues", other_issues)
-                    ]:
-                        if items:
-                            with st.expander(f"{category} ({len(items)})", expanded=(category == "Quality Issues")):
-                                for item in items:
-                                    st.markdown(f"**Return Reason:** {item['return_reason']}")
-                                    st.markdown(f"**Analysis:** {item['analysis']}")
-                                    st.divider()
-                    
-                    # Generate recommendations
-                    if st.button("Generate Return Reduction Plan", key="return_plan"):
-                        with st.spinner("Generating return reduction plan..."):
-                            # Increment the API call counter
-                            if 'ai_api_calls' in st.session_state:
-                                st.session_state.ai_api_calls += 1
+                    # Display return insights
+                    for i, insight in enumerate(return_insights):
+                        with st.expander(f"Return Reason {i+1}: {insight['return_reason'][:50]}..."):
+                            st.markdown("**Return Reason:**")
+                            st.write(insight['return_reason'])
                             
-                            # Prepare categories breakdown
-                            categories_text = "\n".join([f"{category}: {count} returns ({count/total_returns*100:.1f}%)" 
-                                                        for category, count in return_categories.items()])
-                            
-                            # Prepare return reasons text
-                            return_reasons_text = "\n".join([f"- {insight['return_reason']}" for insight in return_insights])
-                            
-                            prompt = f"""Create an actionable return reduction plan for this Amazon medical device:
-                            
-                            Product: {product_info['name']} (ASIN: {product_info['asin']})
-                            Category: {product_info['category']}
-                            Current Return Rate: {product_info.get('return_rate_30d', 0):.2f}%
-                            
-                            Return Reasons Categories:
-                            {categories_text}
-                            
-                            Specific Return Reasons:
-                            {return_reasons_text}
-                            
-                            Please provide:
-                            1. Immediate listing changes to reduce returns (top 3 priorities)
-                            2. Product improvement recommendations
-                            3. Packaging/instructions improvements
-                            4. Customer expectation management strategies
-                            5. Expected impact on return rate for each recommendation
-                            
-                            The plan should be specific, actionable, and prioritized by impact.
-                            """
-                            
-                            messages = [
-                                {"role": "system", "content": "You are an expert Amazon listing optimization specialist with deep expertise in reducing return rates for medical devices."},
-                                {"role": "user", "content": prompt}
-                            ]
-                            
-                            try:
-                                # Check which version of the OpenAI SDK is being used
-                                if 'client' in globals():  # New SDK (v1.0.0+)
-                                    response = client.chat.completions.create(
-                                        model="gpt-4o",
-                                        messages=messages,
-                                        max_tokens=1000,
-                                        temperature=0.2
-                                    )
-                                    result = response.choices[0].message.content
-                                else:  # Legacy SDK (<v1.0.0)
-                                    response = openai.ChatCompletion.create(
-                                        model="gpt-4o",
-                                        messages=messages,
-                                        max_tokens=1000,
-                                        temperature=0.2
-                                    )
-                                    result = response.choices[0].message.content
-                                
-                                st.success("Return reduction plan generated!")
-                                st.markdown("### Return Reduction Plan")
-                                st.markdown(result)
-                                
-                                # Store in AI insights
-                                st.session_state.ai_insights[product_info['asin']]['insights']['return_reduction_plan'] = result
-                            except Exception as e:
-                                st.error(f"Error generating return reduction plan: {str(e)}")
+                            st.markdown("**AI Analysis:**")
+                            st.markdown(insight['analysis'])
                 else:
                     st.info("No AI return insights available. Run an AI-Enhanced Analysis with return reasons data to generate insights.")
             
@@ -2490,14 +1485,6 @@ def render_ai_insights():
                     export_content += "## Listing Optimization\n"
                     export_content += insights['insights']['listing_optimization'] + "\n\n"
                 
-                if 'return_reduction_plan' in insights['insights']:
-                    export_content += "## Return Reduction Plan\n"
-                    export_content += insights['insights']['return_reduction_plan'] + "\n\n"
-                
-                if 'competitive_analysis' in insights['insights']:
-                    export_content += "## Competitive Analysis\n"
-                    export_content += insights['insights']['competitive_analysis'] + "\n\n"
-                
                 # Download buttons
                 st.download_button(
                     label="Export as Markdown",
@@ -2505,69 +1492,6 @@ def render_ai_insights():
                     file_name=f"{product_info['asin']}_ai_insights.md",
                     mime="text/markdown"
                 )
-                
-                # Export to Excel (if xlsxwriter available)
-                if HAS_LOCAL_MODULES and AVAILABLE_MODULES['xlsx_writer'] and AVAILABLE_MODULES['pandas'] and 'review_insights' in insights['insights']:
-                    try:
-                        # Create Excel output
-                        output = io.BytesIO()
-                        writer = pd.ExcelWriter(output, engine='xlsxwriter')
-                        
-                        # Create review insights sheet
-                        if 'review_insights' in insights['insights'] and insights['insights']['review_insights']:
-                            reviews_data = []
-                            for insight in insights['insights']['review_insights']:
-                                reviews_data.append({
-                                    'Review': insight['review'],
-                                    'Rating': insight['rating'],
-                                    'Analysis': insight['analysis']
-                                })
-                            
-                            reviews_df = pd.DataFrame(reviews_data)
-                            reviews_df.to_excel(writer, sheet_name='Review Analysis', index=False)
-                        
-                        # Create return insights sheet
-                        if 'return_insights' in insights['insights'] and insights['insights']['return_insights']:
-                            returns_data = []
-                            for insight in insights['insights']['return_insights']:
-                                returns_data.append({
-                                    'Return Reason': insight['return_reason'],
-                                    'Analysis': insight['analysis']
-                                })
-                            
-                            returns_df = pd.DataFrame(returns_data)
-                            returns_df.to_excel(writer, sheet_name='Return Analysis', index=False)
-                        
-                        # Create recommendations sheet
-                        if 'recommendations' in insights['insights']:
-                            recommendations_df = pd.DataFrame({
-                                'Section': ['Product Recommendations'],
-                                'Content': [insights['insights']['recommendations']]
-                            })
-                            recommendations_df.to_excel(writer, sheet_name='Recommendations', index=False)
-                        
-                        # Create listing optimization sheet
-                        if 'listing_optimization' in insights['insights']:
-                            listing_df = pd.DataFrame({
-                                'Section': ['Listing Optimization'],
-                                'Content': [insights['insights']['listing_optimization']]
-                            })
-                            listing_df.to_excel(writer, sheet_name='Listing Optimization', index=False)
-                        
-                        # Save the workbook
-                        writer.close()
-                        
-                        # Provide download button for Excel
-                        st.download_button(
-                            label="Export as Excel",
-                            data=output.getvalue(),
-                            file_name=f"{product_info['asin']}_ai_insights.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        )
-                    except Exception as e:
-                        st.error(f"Error creating Excel export: {str(e)}")
-                else:
-                    st.warning("Excel export requires xlsxwriter and pandas. These modules may not be available.")
         else:
             st.warning(f"No AI insights available for {st.session_state.current_product['name']}. Please run an AI-Enhanced Analysis first.")
     else:
@@ -2619,7 +1543,7 @@ def render_help_section():
           - Specific improvement recommendations
         
         ### 5. Export Recommendations
-        - Export insights as Markdown or Excel for sharing with your team
+        - Export insights as Markdown for sharing with your team
         """)
         
         st.info("💡 **Pro Tip:** Start with the example data to explore all features, then import your actual product data when you're ready.")
@@ -2685,15 +1609,9 @@ def render_help_section():
         - **Return Reduction Plans**: Targeted actions to reduce return rates
         - **Competitive Analysis**: Positioning against similar products
         - **Product Improvement Suggestions**: Based on customer feedback
-        
-        ### Data Visualization
-        - Return rate trends
-        - Review sentiment analysis
-        - Listing quality scoring
-        - Return reason categorization
         """)
         
-        st.warning("Note: The AI requires your OpenAI API key to be configured in Streamlit app settings. The API key should be named 'openai_api_key'.")
+        st.warning("Note: The AI requires your OpenAI API key to be configured in Streamlit app settings as 'openai_api_key'.")
     
     with help_tabs[3]:
         st.subheader("Support Resources")
@@ -2709,7 +1627,7 @@ def render_help_section():
         that functionality will be limited in the application.
         """)
         
-        st.info("💡 **Tip:** Use the 'Load Example Data' button in the sidebar to see how the app works with sample data.")
+        st.info("💡 **Tip:** Use the 'Test API Connection' button in the sidebar to verify your OpenAI API key is working correctly.")
 
 # Run the application
 if __name__ == "__main__":
