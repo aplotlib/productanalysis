@@ -203,20 +203,65 @@ for key in ['analysis_results', 'uploaded_files', 'current_product', 'ai_insight
 
 # Set up custom Streamlit theme with cyberpunk aesthetics
 def set_cyberpunk_theme():
+    # Define colors for light/dark mode
+    if st.session_state.theme_mode == 'dark':
+        bg_color = COLOR_BACKGROUND
+        text_color = COLOR_TEXT
+        panel_color = COLOR_PANEL
+    else:  # light mode
+        bg_color = "#f5f5ff"  # Light lavender white
+        text_color = "#2c2c3d"  # Dark blue-gray
+        panel_color = "#ffffff"  # White
+    
     st.markdown(f"""
     <style>
-        .stApp {{ background-color: {COLOR_BACKGROUND}; color: {COLOR_TEXT}; }}
-        h1, h2, h3, h4, h5, h6 {{ color: {COLOR_PRIMARY}; text-shadow: 0 0 10px rgba(153, 69, 255, 0.5); letter-spacing: 1px; }}
-        p, ol, ul, dl {{ color: {COLOR_TEXT}; }}
+        .stApp {{ background-color: {bg_color}; color: {text_color}; }}
+        h1, h2, h3, h4, h5, h6 {{ color: {COLOR_PRIMARY}; 
+                                  text-shadow: 0 0 10px rgba(153, 69, 255, 0.3); 
+                                  letter-spacing: 1px; }}
+        p, ol, ul, dl {{ color: {text_color}; }}
         a {{ color: {COLOR_SECONDARY}; text-decoration: none; }}
         a:hover {{ color: {COLOR_PRIMARY}; text-decoration: underline; }}
-        .css-1d391kg, .css-12oz5g7 {{ background-color: {COLOR_PANEL}; }}
-        .stButton>button {{ border: 2px solid {COLOR_PRIMARY}; border-radius: 4px; color: {COLOR_TEXT}; 
-                          background-color: rgba(153, 69, 255, 0.2); transition: all 0.3s ease; }}
-        .stButton>button:hover {{ background-color: {COLOR_PRIMARY}; color: white; box-shadow: 0 0 15px {COLOR_PRIMARY}; }}
-        [data-testid="stMetricValue"] {{ font-size: 2.5rem; color: {COLOR_SECONDARY}; text-shadow: 0 0 10px rgba(20, 241, 149, 0.5); }}
-        .custom-hr {{ border: 0; height: 1px; background-image: linear-gradient(to right, rgba(153, 69, 255, 0), rgba(153, 69, 255, 0.75), rgba(153, 69, 255, 0)); margin: 20px 0; }}
-        .streamlit-expanderHeader, .stMarkdown, p {{ color: {COLOR_TEXT} !important; }}
+        .css-1d391kg, .css-12oz5g7 {{ background-color: {panel_color}; }}
+        .stButton>button {{ border: 2px solid {COLOR_PRIMARY}; border-radius: 4px; 
+                          color: {text_color}; background-color: rgba(153, 69, 255, 0.1); 
+                          transition: all 0.3s ease; }}
+        .stButton>button:hover {{ background-color: {COLOR_PRIMARY}; color: white; 
+                                box-shadow: 0 0 15px {COLOR_PRIMARY}; }}
+        [data-testid="stMetricValue"] {{ font-size: 2.5rem; color: {COLOR_SECONDARY}; 
+                                       text-shadow: 0 0 10px rgba(20, 241, 149, 0.3); }}
+        .custom-hr {{ border: 0; height: 1px; 
+                    background-image: linear-gradient(to right, rgba(153, 69, 255, 0), 
+                                                    rgba(153, 69, 255, 0.75), 
+                                                    rgba(153, 69, 255, 0)); 
+                    margin: 20px 0; }}
+        .streamlit-expanderHeader, .stMarkdown, p {{ color: {text_color} !important; }}
+        
+        /* Improve contrast in data tables for light mode */
+        .stDataFrame [data-testid="stTable"] {{
+            color: {text_color};
+        }}
+        
+        /* Tabs styling */
+        .stTabs [data-baseweb="tab-list"] {{
+            background-color: {panel_color};
+        }}
+        
+        .stTabs [data-baseweb="tab"] {{
+            color: {text_color};
+        }}
+        
+        /* Input fields */
+        .stTextInput>div>div>input, .stNumberInput>div>div>input, .stSelectbox>div>div>div,
+        .stTextArea>div>div>textarea {{
+            color: {text_color} !important;
+            background-color: {panel_color} !important;
+        }}
+        
+        /* Code blocks */
+        .stCode {{
+            background-color: {COLOR_PANEL if st.session_state.theme_mode == 'dark' else '#f0f0f7'};
+        }}
     </style>
     """, unsafe_allow_html=True)
 
@@ -439,8 +484,8 @@ def call_openai_api(messages, temperature=0.7, max_tokens=1024, model="gpt-4o", 
     try:
         # If we have image data, add it to the message content
         if image_data and isinstance(messages, list) and len(messages) > 0:
-            # Use GPT-4 Vision model
-            vision_model = "gpt-4-vision-preview"
+            # Use GPT-4 with vision capabilities - use latest model (not the deprecated preview)
+            vision_model = "gpt-4-vision" # Updated from deprecated gpt-4-vision-preview
             
             # Encode the image data
             if isinstance(image_data, bytes):
@@ -973,6 +1018,20 @@ def main():
     with st.sidebar:
         st.header("Settings")
         st.markdown(f"<p>Support: <a href='mailto:{SUPPORT_EMAIL}'>{SUPPORT_EMAIL}</a></p>", unsafe_allow_html=True)
+        
+        # Theme toggle
+        theme_col1, theme_col2 = st.columns(2)
+        with theme_col1:
+            st.write("Theme:")
+        with theme_col2:
+            if st.toggle("Light Mode", value=(st.session_state.theme_mode == 'light')):
+                st.session_state.theme_mode = 'light'
+            else:
+                st.session_state.theme_mode = 'dark'
+            
+            # Note: need to rerun to apply the theme change
+            if st.button("Apply Theme"):
+                st.experimental_rerun()
         
         # 1-click example loader
         if st.button("Load Example Data", type="primary"):
