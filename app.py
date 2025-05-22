@@ -1,8 +1,20 @@
 """
-Amazon Medical Device Listing Optimizer - Main Application (FIXED)
+Amazon Medical Device Text Analysis Optimizer - Main Application
 
-Compatibility: Python 3.8+, Streamlit 1.28+
-Production Ready: Yes
+**PRIMARY FOCUS: Customer Feedback Text Analysis & Quality Management**
+
+Designed specifically for listing managers who need:
+✓ Deep text analysis of customer comments and reviews
+✓ Date range filtering for temporal analysis  
+✓ Medical device quality categorization (comfort, assembly, safety, etc.)
+✓ CAPA recommendations based on customer feedback patterns
+✓ Actionable insights for listing optimization
+
+Architecture: Text Analysis Engine → AI Enhancement → Quality Management Dashboard
+
+Author: Assistant
+Version: 3.0 - Text Analysis Focused
+Compliance: ISO 13485 Quality Management Awareness
 """
 
 import streamlit as st
@@ -12,18 +24,21 @@ import json
 import logging
 import traceback
 import io
-from datetime import datetime, timedelta
+import re
+from datetime import datetime, timedelta, date
 from typing import Dict, List, Any, Optional, Tuple
 import threading
 import time
+from collections import defaultdict, Counter
+from dataclasses import dataclass, asdict
 
-# Configure logging
+# Configure logging for quality management traceability
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler('app.log', mode='a')
+        logging.FileHandler('medical_device_analysis.log', mode='a')
     ]
 )
 logger = logging.getLogger(__name__)
@@ -47,9 +62,8 @@ def safe_import(module_name, from_module=None):
         MODULES_LOADED[module_name] = False
         return None, False
 
-# Import custom modules with error handling
+# Import custom modules
 upload_handler_module, upload_available = safe_import('upload_handler')
-scoring_module, scoring_available = safe_import('product_scoring')
 ai_analysis_module, ai_available = safe_import('enhanced_ai_analysis')
 dashboard_module, dashboard_available = safe_import('dashboard')
 
@@ -58,11 +72,6 @@ if upload_available:
 else:
     logger.error("Upload handler module not available")
     
-if scoring_available:
-    from product_scoring import CompositeScoring, CompositeScore, SCORING_WEIGHTS, CATEGORY_BENCHMARKS
-else:
-    logger.error("Scoring module not available")
-
 if ai_available:
     from enhanced_ai_analysis import EnhancedAIAnalyzer, AnalysisResult
 else:
@@ -73,96 +82,772 @@ if dashboard_available:
 else:
     logger.error("Dashboard module not available")
 
-# Application configuration
+# Application configuration focused on text analysis
 APP_CONFIG = {
-    'title': 'Amazon Medical Device Listing Optimizer',
-    'version': '2.0',
-    'description': 'Professional performance analytics for medical device listings',
-    'support_email': 'support@listingoptimizer.com',
-    'max_products_free': 50,
-    'session_timeout_hours': 4,
-    'python_version': '3.8+',
-    'streamlit_version': '1.28+'
+    'title': 'Medical Device Customer Feedback Analyzer',
+    'version': '3.0',
+    'description': 'Text analysis and quality management for medical device customer feedback',
+    'support_email': 'support@medical-device-analyzer.com',
+    'max_products_analysis': 100,
+    'session_timeout_hours': 6,
+    'focus': 'Customer Text Analysis & Quality Management',
+    'compliance': 'ISO 13485 Aware'
 }
 
-# Example data - realistic medical device data
-EXAMPLE_DATA = {
+# Medical Device Quality Categories (ISO 13485 aligned)
+QUALITY_CATEGORIES = {
+    'safety_concerns': {
+        'name': 'Safety & Risk',
+        'keywords': ['unsafe', 'dangerous', 'injury', 'hurt', 'hazard', 'broken', 'sharp', 'cuts', 'unstable', 'tip over', 'fall'],
+        'severity': 'high',
+        'iso_ref': 'ISO 13485 Section 7.3 - Risk Management'
+    },
+    'comfort_usability': {
+        'name': 'Comfort & Usability',
+        'keywords': ['uncomfortable', 'painful', 'hurts', 'sore', 'hard', 'rough', 'difficult', 'confusing', 'awkward'],
+        'severity': 'medium',
+        'iso_ref': 'ISO 13485 Section 7.3 - User Requirements'
+    },
+    'assembly_instructions': {
+        'name': 'Assembly & Instructions',
+        'keywords': ['assembly', 'instructions', 'directions', 'setup', 'confusing', 'unclear', 'missing parts', 'difficult setup'],
+        'severity': 'medium',
+        'iso_ref': 'ISO 13485 Section 4.2 - Documentation Requirements'
+    },
+    'durability_quality': {
+        'name': 'Durability & Quality',
+        'keywords': ['broke', 'broken', 'cheap', 'flimsy', 'fell apart', 'cracked', 'tore', 'bent', 'snapped', 'poor quality'],
+        'severity': 'high',
+        'iso_ref': 'ISO 13485 Section 7.5 - Production Controls'
+    },
+    'sizing_fit': {
+        'name': 'Sizing & Fit',
+        'keywords': ['too small', 'too big', 'wrong size', 'doesnt fit', 'tight', 'loose', 'sizing chart', 'measurements'],
+        'severity': 'medium',
+        'iso_ref': 'ISO 13485 Section 7.3 - Design Specifications'
+    },
+    'efficacy_performance': {
+        'name': 'Efficacy & Performance',
+        'keywords': ['doesnt work', 'ineffective', 'no relief', 'no help', 'not working', 'useless', 'no improvement'],
+        'severity': 'high',
+        'iso_ref': 'ISO 13485 Section 7.3 - Performance Requirements'
+    },
+    'shipping_packaging': {
+        'name': 'Shipping & Packaging',
+        'keywords': ['damaged shipping', 'poor packaging', 'arrived broken', 'shipping damage', 'packaging issues'],
+        'severity': 'low',
+        'iso_ref': 'ISO 13485 Section 7.5 - Packaging Requirements'
+    }
+}
+
+# Date range options for temporal analysis
+DATE_FILTER_OPTIONS = {
+    'last_7_days': {'days': 7, 'label': 'Last 7 Days'},
+    'last_30_days': {'days': 30, 'label': 'Last 30 Days'},
+    'last_90_days': {'days': 90, 'label': 'Last 90 Days'},
+    'last_180_days': {'days': 180, 'label': 'Last 6 Months'},
+    'last_365_days': {'days': 365, 'label': 'Last 12 Months'},
+    'custom': {'days': None, 'label': 'Custom Date Range'}
+}
+
+# Example data focused on customer feedback text analysis
+EXAMPLE_FEEDBACK_DATA = {
     'products': [
         {
             'asin': 'B0DT7NW5VY',
             'name': 'Vive Tri-Rollator with Seat and Storage',
             'category': 'Mobility Aids',
             'sku': 'VH-TRI-001',
-            'sales_30d': 491,
-            'returns_30d': 24,
-            'sales_365d': 5840,
-            'returns_365d': 285,
-            'star_rating': 4.2,
-            'total_reviews': 287,
-            'average_price': 129.99,
-            'cost_per_unit': 65.00,
-            'description': 'Premium tri-wheel rollator with padded seat, storage pouch, and easy-fold design for seniors and mobility assistance.'
+            'current_return_rate': 4.9,
+            'total_feedback_items': 156,
+            'analysis_period': '2024-01-01 to 2024-11-20'
         },
         {
-            'asin': 'B0DT8XYZ123',
+            'asin': 'B0DT8XYZ123', 
             'name': 'Premium Shower Chair with Back Support',
             'category': 'Bathroom Safety',
             'sku': 'VH-SHW-234',
-            'sales_30d': 325,
-            'returns_30d': 13,
-            'sales_365d': 3900,
-            'returns_365d': 156,
-            'star_rating': 4.5,
-            'total_reviews': 156,
-            'average_price': 79.99,
-            'cost_per_unit': 35.00,
-            'description': 'Adjustable shower chair with antimicrobial seat, non-slip feet, and ergonomic back support for bathroom safety.'
-        },
-        {
-            'asin': 'B08CK7MN45',
-            'name': 'Memory Foam Seat Cushion',
-            'category': 'Pain Relief',
-            'sku': 'VH-CUS-352',
-            'sales_30d': 623,
-            'returns_30d': 31,
-            'sales_365d': 7250,
-            'returns_365d': 362,
-            'star_rating': 4.6,
-            'total_reviews': 501,
-            'average_price': 39.99,
-            'cost_per_unit': 18.00,
-            'description': 'Orthopedic memory foam seat cushion with cooling gel insert for pressure relief and improved posture.'
+            'current_return_rate': 4.0,
+            'total_feedback_items': 98,
+            'analysis_period': '2024-01-01 to 2024-11-20'
         }
     ],
-    'reviews': {
+    'customer_feedback': {
         'B0DT7NW5VY': [
-            {'rating': 5, 'review_text': 'This rollator is amazing! Very stable and the seat is so comfortable. Great for my daily walks.', 'asin': 'B0DT7NW5VY'},
-            {'rating': 4, 'review_text': 'Good quality rollator but the assembly instructions could be clearer. Works great once set up.', 'asin': 'B0DT7NW5VY'},
-            {'rating': 2, 'review_text': 'The wheels started squeaking after just 2 weeks. Also heavier than expected.', 'asin': 'B0DT7NW5VY'},
+            {
+                'date': '2024-11-15',
+                'type': 'review',
+                'rating': 2,
+                'text': 'The wheels started squeaking loudly after just 2 weeks of use. Very annoying and seems cheaply made.',
+                'category_flags': ['durability_quality']
+            },
+            {
+                'date': '2024-11-12',
+                'type': 'return_reason',
+                'text': 'Too heavy for elderly user to maneuver easily. Difficult to lift over thresholds.',
+                'category_flags': ['comfort_usability', 'sizing_fit']
+            },
+            {
+                'date': '2024-11-10',
+                'type': 'review',
+                'rating': 5,
+                'text': 'This rollator is amazing! Very stable and the seat is so comfortable. Great for my daily walks.',
+                'category_flags': ['positive_feedback']
+            },
+            {
+                'date': '2024-11-08',
+                'type': 'return_reason',
+                'text': 'Assembly instructions were confusing and missing parts diagram. Could not complete setup.',
+                'category_flags': ['assembly_instructions']
+            }
         ],
         'B0DT8XYZ123': [
-            {'rating': 5, 'review_text': 'Excellent shower chair! Very sturdy and the back support is perfect. Easy to adjust height.', 'asin': 'B0DT8XYZ123'},
-            {'rating': 4, 'review_text': 'Good chair but the legs could be a bit more stable. Overall satisfied with purchase.', 'asin': 'B0DT8XYZ123'},
-        ]
-    },
-    'returns': {
-        'B0DT7NW5VY': [
-            {'return_reason': 'Wheels started squeaking loudly after 2 weeks of use', 'asin': 'B0DT7NW5VY'},
-            {'return_reason': 'Too heavy for elderly user to maneuver easily', 'asin': 'B0DT7NW5VY'},
-        ],
-        'B0DT8XYZ123': [
-            {'return_reason': 'Chair legs not stable enough on wet surfaces', 'asin': 'B0DT8XYZ123'},
+            {
+                'date': '2024-11-14',
+                'type': 'review',
+                'rating': 4,
+                'text': 'Good chair but the legs could be more stable on wet surfaces. Overall satisfied with purchase.',
+                'category_flags': ['safety_concerns', 'comfort_usability']
+            },
+            {
+                'date': '2024-11-11',
+                'type': 'return_reason',
+                'text': 'Chair legs not stable enough, felt unsafe in shower. Safety concern for elderly parent.',
+                'category_flags': ['safety_concerns']
+            }
         ]
     }
 }
 
+@dataclass
+class TextAnalysisResult:
+    """Structured container for text analysis results"""
+    asin: str
+    product_name: str
+    analysis_period: str
+    total_feedback_items: int
+    
+    # Category breakdown
+    category_analysis: Dict[str, Any]
+    
+    # Temporal trends
+    trend_analysis: Dict[str, Any]
+    
+    # Quality insights
+    quality_assessment: Dict[str, Any]
+    
+    # CAPA recommendations
+    capa_recommendations: List[Dict[str, Any]]
+    
+    # Risk assessment
+    risk_level: str
+    risk_factors: List[str]
+    
+    # Success metrics
+    positive_indicators: List[str]
+    improvement_opportunities: List[str]
+    
+    timestamp: str = None
+    
+    def __post_init__(self):
+        if self.timestamp is None:
+            self.timestamp = datetime.now().isoformat()
+
+class TextAnalysisEngine:
+    """
+    Core Text Analysis Engine - Primary component for customer feedback interpretation
+    
+    This is the main analytical engine that processes customer comments, reviews, and
+    return reasons to provide quality management insights for medical device listings.
+    """
+    
+    def __init__(self):
+        self.quality_categories = QUALITY_CATEGORIES
+        logger.info("Text Analysis Engine initialized - Core component ready")
+    
+    def analyze_customer_feedback(self, feedback_data: List[Dict[str, Any]], 
+                                date_filter: Optional[Dict[str, Any]] = None) -> TextAnalysisResult:
+        """
+        Main text analysis function - analyzes customer feedback for quality insights
+        
+        Args:
+            feedback_data: List of customer feedback items (reviews, returns, etc.)
+            date_filter: Optional date range filter for temporal analysis
+            
+        Returns:
+            TextAnalysisResult: Comprehensive analysis with quality insights
+        """
+        
+        if not feedback_data:
+            logger.warning("No feedback data provided for analysis")
+            return self._create_empty_result()
+        
+        # Filter data by date if specified
+        filtered_data = self._apply_date_filter(feedback_data, date_filter) if date_filter else feedback_data
+        
+        logger.info(f"Analyzing {len(filtered_data)} feedback items (filtered from {len(feedback_data)} total)")
+        
+        # Perform comprehensive text analysis
+        category_analysis = self._analyze_by_quality_categories(filtered_data)
+        trend_analysis = self._analyze_temporal_trends(filtered_data)
+        quality_assessment = self._assess_quality_indicators(filtered_data, category_analysis)
+        capa_recommendations = self._generate_capa_recommendations(category_analysis, quality_assessment)
+        risk_assessment = self._assess_risk_level(category_analysis, quality_assessment)
+        improvement_analysis = self._identify_improvement_opportunities(category_analysis, filtered_data)
+        
+        # Extract product info from first item
+        product_info = self._extract_product_info(feedback_data)
+        
+        return TextAnalysisResult(
+            asin=product_info.get('asin', 'unknown'),
+            product_name=product_info.get('name', 'Unknown Product'),
+            analysis_period=self._format_analysis_period(filtered_data, date_filter),
+            total_feedback_items=len(filtered_data),
+            category_analysis=category_analysis,
+            trend_analysis=trend_analysis,
+            quality_assessment=quality_assessment,
+            capa_recommendations=capa_recommendations,
+            risk_level=risk_assessment['level'],
+            risk_factors=risk_assessment['factors'],
+            positive_indicators=improvement_analysis['positive'],
+            improvement_opportunities=improvement_analysis['opportunities']
+        )
+    
+    def _apply_date_filter(self, feedback_data: List[Dict[str, Any]], 
+                          date_filter: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Apply date range filtering to feedback data"""
+        
+        if not date_filter or not date_filter.get('start_date'):
+            return feedback_data
+        
+        start_date = date_filter['start_date']
+        end_date = date_filter.get('end_date', datetime.now().date())
+        
+        filtered_data = []
+        for item in feedback_data:
+            item_date_str = item.get('date', '')
+            if item_date_str:
+                try:
+                    # Handle various date formats
+                    if isinstance(item_date_str, str):
+                        item_date = datetime.strptime(item_date_str, '%Y-%m-%d').date()
+                    else:
+                        item_date = item_date_str
+                    
+                    if start_date <= item_date <= end_date:
+                        filtered_data.append(item)
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Could not parse date {item_date_str}: {str(e)}")
+                    # Include items with unparseable dates to avoid data loss
+                    filtered_data.append(item)
+        
+        logger.info(f"Date filter applied: {len(filtered_data)} items remain from {len(feedback_data)} total")
+        return filtered_data
+    
+    def _analyze_by_quality_categories(self, feedback_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Analyze feedback by medical device quality categories"""
+        
+        category_results = {}
+        total_items = len(feedback_data)
+        
+        for category_id, category_info in self.quality_categories.items():
+            category_matches = []
+            category_keywords = category_info['keywords']
+            
+            # Find feedback items that match this category
+            for item in feedback_data:
+                text = item.get('text', '').lower()
+                
+                # Check for keyword matches
+                matches = []
+                for keyword in category_keywords:
+                    if keyword in text:
+                        matches.append(keyword)
+                
+                if matches:
+                    category_matches.append({
+                        'item': item,
+                        'matched_keywords': matches,
+                        'match_strength': len(matches)
+                    })
+            
+            # Calculate category metrics
+            category_count = len(category_matches)
+            category_percentage = (category_count / total_items * 100) if total_items > 0 else 0
+            
+            # Analyze severity and patterns
+            severity_breakdown = self._analyze_category_severity(category_matches, category_info)
+            common_patterns = self._extract_common_patterns(category_matches)
+            
+            category_results[category_id] = {
+                'name': category_info['name'],
+                'count': category_count,
+                'percentage': round(category_percentage, 1),
+                'severity': category_info['severity'],
+                'iso_reference': category_info['iso_ref'],
+                'matches': category_matches,
+                'severity_breakdown': severity_breakdown,
+                'common_patterns': common_patterns,
+                'requires_capa': category_count > 0 and category_info['severity'] in ['high', 'medium']
+            }
+        
+        # Add overall summary
+        total_categorized = sum(result['count'] for result in category_results.values())
+        uncategorized_count = total_items - total_categorized
+        
+        category_results['summary'] = {
+            'total_feedback_items': total_items,
+            'total_categorized': total_categorized,
+            'uncategorized_count': uncategorized_count,
+            'categorization_rate': round((total_categorized / total_items * 100), 1) if total_items > 0 else 0
+        }
+        
+        return category_results
+    
+    def _analyze_temporal_trends(self, feedback_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Analyze temporal trends in customer feedback"""
+        
+        # Group feedback by date
+        date_groups = defaultdict(list)
+        for item in feedback_data:
+            item_date = item.get('date', '')
+            if item_date:
+                try:
+                    if isinstance(item_date, str):
+                        parsed_date = datetime.strptime(item_date, '%Y-%m-%d').date()
+                    else:
+                        parsed_date = item_date
+                    
+                    date_groups[parsed_date].append(item)
+                except (ValueError, TypeError):
+                    date_groups['unknown'].append(item)
+        
+        # Calculate weekly trends
+        weekly_trends = self._calculate_weekly_trends(date_groups)
+        
+        # Identify trend patterns
+        trend_patterns = self._identify_trend_patterns(weekly_trends)
+        
+        return {
+            'daily_breakdown': dict(date_groups),
+            'weekly_trends': weekly_trends,
+            'trend_patterns': trend_patterns,
+            'analysis_span_days': self._calculate_analysis_span(date_groups)
+        }
+    
+    def _assess_quality_indicators(self, feedback_data: List[Dict[str, Any]], 
+                                 category_analysis: Dict[str, Any]) -> Dict[str, Any]:
+        """Assess overall quality indicators from feedback analysis"""
+        
+        total_items = len(feedback_data)
+        
+        # Calculate positive vs negative feedback ratio
+        positive_count = 0
+        negative_count = 0
+        
+        for item in feedback_data:
+            rating = item.get('rating')
+            text = item.get('text', '').lower()
+            
+            # Determine sentiment
+            if rating:
+                if rating >= 4:
+                    positive_count += 1
+                elif rating <= 2:
+                    negative_count += 1
+            else:
+                # Text-based sentiment for non-rated feedback (returns, etc.)
+                positive_indicators = ['great', 'excellent', 'love', 'perfect', 'amazing', 'wonderful']
+                negative_indicators = ['terrible', 'awful', 'hate', 'worst', 'horrible', 'broken']
+                
+                if any(indicator in text for indicator in positive_indicators):
+                    positive_count += 1
+                elif any(indicator in text for indicator in negative_indicators):
+                    negative_count += 1
+        
+        # Quality score calculation
+        if total_items > 0:
+            positive_ratio = positive_count / total_items
+            negative_ratio = negative_count / total_items
+            quality_score = (positive_ratio - negative_ratio + 1) / 2 * 100  # Normalize to 0-100
+        else:
+            quality_score = 50  # Neutral if no data
+        
+        # Risk indicators from category analysis
+        high_risk_categories = [cat for cat, data in category_analysis.items() 
+                              if cat != 'summary' and data.get('severity') == 'high' and data.get('count', 0) > 0]
+        
+        return {
+            'total_feedback_analyzed': total_items,
+            'positive_feedback_count': positive_count,
+            'negative_feedback_count': negative_count,
+            'neutral_feedback_count': total_items - positive_count - negative_count,
+            'positive_ratio': round(positive_ratio * 100, 1) if total_items > 0 else 0,
+            'negative_ratio': round(negative_ratio * 100, 1) if total_items > 0 else 0,
+            'quality_score': round(quality_score, 1),
+            'quality_level': self._determine_quality_level(quality_score),
+            'high_risk_categories': high_risk_categories,
+            'requires_immediate_action': len(high_risk_categories) > 0
+        }
+    
+    def _generate_capa_recommendations(self, category_analysis: Dict[str, Any], 
+                                     quality_assessment: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Generate CAPA (Corrective and Preventive Action) recommendations"""
+        
+        capa_recommendations = []
+        
+        # Safety-related CAPA (highest priority)
+        safety_issues = category_analysis.get('safety_concerns', {})
+        if safety_issues.get('count', 0) > 0:
+            capa_recommendations.append({
+                'priority': 'Critical',
+                'category': 'Safety & Risk Management',
+                'issue': f"{safety_issues['count']} safety concerns identified in customer feedback",
+                'corrective_action': 'Immediate product safety review and customer notification if required',
+                'preventive_action': 'Implement enhanced safety testing protocols and clearer safety warnings',
+                'timeline': 'Immediate (24-48 hours)',
+                'iso_reference': 'ISO 13485 Section 8.2.2 - Customer Feedback',
+                'responsibility': 'Quality Manager + Engineering',
+                'success_metric': 'Zero safety-related customer complaints in next 30 days'
+            })
+        
+        # Quality/Durability CAPA
+        durability_issues = category_analysis.get('durability_quality', {})
+        if durability_issues.get('count', 0) > 2:  # Threshold for action
+            capa_recommendations.append({
+                'priority': 'High',
+                'category': 'Product Quality & Durability',
+                'issue': f"{durability_issues['count']} durability/quality complaints affecting customer satisfaction",
+                'corrective_action': 'Review manufacturing processes and incoming material quality',
+                'preventive_action': 'Implement additional quality checkpoints in production',
+                'timeline': '1-2 weeks',
+                'iso_reference': 'ISO 13485 Section 7.5 - Production Controls',
+                'responsibility': 'Manufacturing Manager + Quality Assurance',
+                'success_metric': 'Reduce durability complaints by 50% in next 60 days'
+            })
+        
+        # Assembly/Instructions CAPA
+        assembly_issues = category_analysis.get('assembly_instructions', {})
+        if assembly_issues.get('count', 0) > 1:
+            capa_recommendations.append({
+                'priority': 'Medium',
+                'category': 'Documentation & User Experience',
+                'issue': f"{assembly_issues['count']} customer complaints about assembly difficulty or unclear instructions",
+                'corrective_action': 'Revise assembly instructions with clearer diagrams and step-by-step photos',
+                'preventive_action': 'User testing of assembly instructions before product launch',
+                'timeline': '2-3 weeks',
+                'iso_reference': 'ISO 13485 Section 4.2 - Documentation Requirements',
+                'responsibility': 'Technical Writing + Customer Experience',
+                'success_metric': 'Improve assembly instruction rating to 4.0+ stars'
+            })
+        
+        # Sizing/Fit CAPA
+        sizing_issues = category_analysis.get('sizing_fit', {})
+        if sizing_issues.get('count', 0) > 1:
+            capa_recommendations.append({
+                'priority': 'Medium',
+                'category': 'Product Specifications & Listing Accuracy',
+                'issue': f"{sizing_issues['count']} customer complaints about sizing/fit expectations",
+                'corrective_action': 'Update product listings with more detailed size charts and measurements',
+                'preventive_action': 'Add size recommendation wizard and clearer size guidance',
+                'timeline': '1 week',
+                'iso_reference': 'ISO 13485 Section 7.3 - Design Specifications',
+                'responsibility': 'Product Management + Marketing',
+                'success_metric': 'Reduce size-related returns by 30% in next 45 days'
+            })
+        
+        # Overall quality score CAPA
+        if quality_assessment.get('quality_score', 50) < 60:
+            capa_recommendations.append({
+                'priority': 'High',
+                'category': 'Overall Customer Satisfaction',
+                'issue': f"Overall quality score is {quality_assessment['quality_score']:.1f}%, below acceptable threshold",
+                'corrective_action': 'Comprehensive review of top customer complaints and rapid resolution plan',
+                'preventive_action': 'Implement proactive customer feedback monitoring and response system',
+                'timeline': '2-4 weeks',
+                'iso_reference': 'ISO 13485 Section 8.5 - Improvement',
+                'responsibility': 'Quality Manager + Customer Success',
+                'success_metric': 'Achieve quality score above 75% within 60 days'
+            })
+        
+        # Sort by priority
+        priority_order = {'Critical': 0, 'High': 1, 'Medium': 2, 'Low': 3}
+        capa_recommendations.sort(key=lambda x: priority_order.get(x['priority'], 3))
+        
+        return capa_recommendations
+    
+    def _assess_risk_level(self, category_analysis: Dict[str, Any], 
+                          quality_assessment: Dict[str, Any]) -> Dict[str, Any]:
+        """Assess overall risk level based on feedback analysis"""
+        
+        risk_factors = []
+        risk_score = 0
+        
+        # Safety risk assessment (highest weight)
+        safety_count = category_analysis.get('safety_concerns', {}).get('count', 0)
+        if safety_count > 0:
+            risk_score += safety_count * 10  # High weight for safety
+            risk_factors.append(f"{safety_count} safety concerns identified")
+        
+        # Quality risk assessment
+        durability_count = category_analysis.get('durability_quality', {}).get('count', 0)
+        if durability_count > 2:
+            risk_score += durability_count * 3
+            risk_factors.append(f"Multiple quality/durability complaints ({durability_count})")
+        
+        # Overall quality score risk
+        quality_score = quality_assessment.get('quality_score', 50)
+        if quality_score < 50:
+            risk_score += (50 - quality_score) / 2
+            risk_factors.append(f"Low overall quality score ({quality_score:.1f}%)")
+        
+        # Negative feedback ratio risk
+        negative_ratio = quality_assessment.get('negative_ratio', 0)
+        if negative_ratio > 20:
+            risk_score += negative_ratio / 5
+            risk_factors.append(f"High negative feedback ratio ({negative_ratio:.1f}%)")
+        
+        # Determine risk level
+        if risk_score >= 30:
+            risk_level = 'Critical'
+        elif risk_score >= 15:
+            risk_level = 'High'
+        elif risk_score >= 5:
+            risk_level = 'Medium'
+        else:
+            risk_level = 'Low'
+        
+        return {
+            'level': risk_level,
+            'score': round(risk_score, 1),
+            'factors': risk_factors,
+            'requires_immediate_action': risk_level in ['Critical', 'High']
+        }
+    
+    def _identify_improvement_opportunities(self, category_analysis: Dict[str, Any], 
+                                          feedback_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Identify positive indicators and improvement opportunities"""
+        
+        positive_indicators = []
+        improvement_opportunities = []
+        
+        # Analyze positive feedback patterns
+        positive_feedback = [item for item in feedback_data 
+                           if item.get('rating', 0) >= 4 or 'positive_feedback' in item.get('category_flags', [])]
+        
+        if positive_feedback:
+            # Extract common positive themes
+            positive_text = ' '.join([item.get('text', '') for item in positive_feedback]).lower()
+            positive_keywords = ['great', 'excellent', 'love', 'perfect', 'amazing', 'comfortable', 'stable', 'easy']
+            
+            for keyword in positive_keywords:
+                if keyword in positive_text:
+                    count = positive_text.count(keyword)
+                    if count > 1:
+                        positive_indicators.append(f"Customers appreciate {keyword} aspects ({count} mentions)")
+        
+        # Identify improvement opportunities from category analysis
+        for category_id, category_data in category_analysis.items():
+            if category_id == 'summary':
+                continue
+                
+            count = category_data.get('count', 0)
+            if count > 0:
+                category_name = category_data['name']
+                if category_data['severity'] in ['high', 'medium']:
+                    improvement_opportunities.append({
+                        'category': category_name,
+                        'impact': 'High' if category_data['severity'] == 'high' else 'Medium',
+                        'description': f"Address {count} customer concerns in {category_name.lower()}",
+                        'potential_benefit': f"Could improve customer satisfaction and reduce returns"
+                    })
+        
+        return {
+            'positive': positive_indicators[:5],  # Top 5 positive indicators
+            'opportunities': improvement_opportunities[:5]  # Top 5 opportunities
+        }
+    
+    def _analyze_category_severity(self, category_matches: List[Dict], category_info: Dict) -> Dict[str, Any]:
+        """Analyze severity breakdown within a category"""
+        
+        if not category_matches:
+            return {'high': 0, 'medium': 0, 'low': 0}
+        
+        severity_counts = {'high': 0, 'medium': 0, 'low': 0}
+        
+        for match in category_matches:
+            item = match['item']
+            rating = item.get('rating', 3)
+            
+            # Determine severity based on rating and match strength
+            if rating <= 2 or match['match_strength'] >= 3:
+                severity_counts['high'] += 1
+            elif rating == 3 or match['match_strength'] == 2:
+                severity_counts['medium'] += 1
+            else:
+                severity_counts['low'] += 1
+        
+        return severity_counts
+    
+    def _extract_common_patterns(self, category_matches: List[Dict]) -> List[str]:
+        """Extract common patterns within a category"""
+        
+        if not category_matches:
+            return []
+        
+        # Collect all matched keywords
+        all_keywords = []
+        for match in category_matches:
+            all_keywords.extend(match['matched_keywords'])
+        
+        # Count frequency and return most common
+        keyword_counts = Counter(all_keywords)
+        common_patterns = [f"{keyword} ({count} mentions)" 
+                          for keyword, count in keyword_counts.most_common(3)]
+        
+        return common_patterns
+    
+    def _calculate_weekly_trends(self, date_groups: Dict) -> Dict[str, Any]:
+        """Calculate weekly trends from daily data"""
+        
+        weekly_data = defaultdict(int)
+        
+        for date_key, items in date_groups.items():
+            if date_key == 'unknown':
+                continue
+                
+            # Get week number
+            week_start = date_key - timedelta(days=date_key.weekday())
+            week_key = week_start.strftime('%Y-W%U')
+            weekly_data[week_key] += len(items)
+        
+        return dict(weekly_data)
+    
+    def _identify_trend_patterns(self, weekly_trends: Dict[str, int]) -> Dict[str, Any]:
+        """Identify patterns in weekly trends"""
+        
+        if len(weekly_trends) < 2:
+            return {'pattern': 'insufficient_data', 'description': 'Need more time periods for trend analysis'}
+        
+        values = list(weekly_trends.values())
+        
+        # Calculate trend direction
+        recent_avg = np.mean(values[-2:]) if len(values) >= 2 else values[-1]
+        earlier_avg = np.mean(values[:-2]) if len(values) > 2 else values[0]
+        
+        if recent_avg > earlier_avg * 1.2:
+            pattern = 'increasing'
+            description = 'Feedback volume is increasing (potential concern)'
+        elif recent_avg < earlier_avg * 0.8:
+            pattern = 'decreasing'
+            description = 'Feedback volume is decreasing (positive trend)'
+        else:
+            pattern = 'stable'
+            description = 'Feedback volume is relatively stable'
+        
+        return {
+            'pattern': pattern,
+            'description': description,
+            'recent_average': round(recent_avg, 1),
+            'earlier_average': round(earlier_avg, 1)
+        }
+    
+    def _calculate_analysis_span(self, date_groups: Dict) -> int:
+        """Calculate the span of analysis in days"""
+        
+        valid_dates = [date_key for date_key in date_groups.keys() if date_key != 'unknown']
+        
+        if len(valid_dates) < 2:
+            return 1
+        
+        min_date = min(valid_dates)
+        max_date = max(valid_dates)
+        
+        return (max_date - min_date).days + 1
+    
+    def _determine_quality_level(self, quality_score: float) -> str:
+        """Determine quality level from score"""
+        
+        if quality_score >= 80:
+            return 'Excellent'
+        elif quality_score >= 70:
+            return 'Good'
+        elif quality_score >= 60:
+            return 'Fair'
+        elif quality_score >= 50:
+            return 'Poor'
+        else:
+            return 'Critical'
+    
+    def _extract_product_info(self, feedback_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Extract product information from feedback data"""
+        
+        if not feedback_data:
+            return {}
+        
+        # Try to get product info from first item
+        first_item = feedback_data[0]
+        return {
+            'asin': first_item.get('asin', 'unknown'),
+            'name': first_item.get('product_name', 'Unknown Product')
+        }
+    
+    def _format_analysis_period(self, filtered_data: List[Dict[str, Any]], 
+                               date_filter: Optional[Dict[str, Any]]) -> str:
+        """Format the analysis period string"""
+        
+        if not filtered_data:
+            return 'No data period'
+        
+        if date_filter:
+            start_date = date_filter.get('start_date')
+            end_date = date_filter.get('end_date', datetime.now().date())
+            return f"{start_date} to {end_date}"
+        
+        # Extract date range from data
+        dates = []
+        for item in filtered_data:
+            item_date = item.get('date')
+            if item_date:
+                try:
+                    if isinstance(item_date, str):
+                        parsed_date = datetime.strptime(item_date, '%Y-%m-%d').date()
+                    else:
+                        parsed_date = item_date
+                    dates.append(parsed_date)
+                except (ValueError, TypeError):
+                    continue
+        
+        if dates:
+            return f"{min(dates)} to {max(dates)}"
+        else:
+            return 'Date range unknown'
+    
+    def _create_empty_result(self) -> TextAnalysisResult:
+        """Create empty result for when no data is available"""
+        
+        return TextAnalysisResult(
+            asin='unknown',
+            product_name='No Data Available',
+            analysis_period='No data period',
+            total_feedback_items=0,
+            category_analysis={'summary': {'total_feedback_items': 0, 'total_categorized': 0}},
+            trend_analysis={'pattern': 'no_data'},
+            quality_assessment={'quality_score': 0, 'quality_level': 'No Data'},
+            capa_recommendations=[],
+            risk_level='Unknown',
+            risk_factors=[],
+            positive_indicators=[],
+            improvement_opportunities=[]
+        )
+
 class SafeDataProcessor:
-    """Thread-safe data processing with proper error handling"""
+    """Enhanced data processor focused on text analysis workflow"""
     
     def __init__(self):
         self.lock = threading.Lock()
         self.upload_handler = None
-        self.scoring_system = None
+        self.text_analysis_engine = TextAnalysisEngine()
         self.ai_analyzer = None
         
         self._initialize_components()
@@ -172,51 +857,33 @@ class SafeDataProcessor:
         try:
             if upload_available:
                 self.upload_handler = UploadHandler()
-                logger.info("Upload handler initialized")
-            
-            if scoring_available:
-                self.scoring_system = CompositeScoring()
-                logger.info("Scoring system initialized")
+                logger.info("Upload handler initialized for text analysis workflow")
             
             if ai_available:
                 self.ai_analyzer = EnhancedAIAnalyzer()
-                logger.info("AI analyzer initialized")
+                logger.info("AI analyzer initialized for enhanced text analysis")
                 
         except Exception as e:
             logger.error(f"Error initializing components: {str(e)}")
     
-    def safe_convert_numeric(self, value, default=0):
-        """Safely convert values to numeric"""
-        if pd.isna(value) or value == '' or value is None:
-            return default
-        try:
-            return float(value)
-        except (ValueError, TypeError):
-            return default
-    
-    def safe_convert_int(self, value, default=0):
-        """Safely convert values to integer"""
-        numeric_val = self.safe_convert_numeric(value, default)
-        try:
-            return int(numeric_val)
-        except (ValueError, TypeError):
-            return default
-    
-    def process_uploaded_data(self, uploaded_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Thread-safe data processing"""
+    def process_uploaded_data(self, uploaded_data: Dict[str, Any], 
+                            date_filter: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Process uploaded data with focus on customer feedback extraction"""
+        
         with self.lock:
             try:
                 processed_data = {
                     'products': [],
-                    'reviews': {},
-                    'returns': {},
-                    'processing_summary': {}
+                    'customer_feedback': {},  # Main focus: customer feedback by ASIN
+                    'text_analysis_results': {},
+                    'processing_summary': {},
+                    'date_filter_applied': date_filter
                 }
                 
-                # Process structured data
+                # Process structured data (mainly for product metadata)
                 if 'structured_data' in uploaded_data:
                     df = uploaded_data['structured_data']
-                    logger.info(f"Processing {len(df)} products from structured data")
+                    logger.info(f"Processing {len(df)} products for metadata")
                     
                     for _, row in df.iterrows():
                         try:
@@ -225,45 +892,103 @@ class SafeDataProcessor:
                                 'name': str(row.get('Product Name', f"Product {row.get('ASIN', 'Unknown')}")),
                                 'category': str(row.get('Category', 'Other')),
                                 'sku': str(row.get('SKU', '')),
-                                'sales_30d': self.safe_convert_int(row.get('Last 30 Days Sales', 0)),
-                                'returns_30d': self.safe_convert_int(row.get('Last 30 Days Returns', 0)),
-                                'sales_365d': self.safe_convert_int(row.get('Last 365 Days Sales')) if pd.notna(row.get('Last 365 Days Sales')) else None,
-                                'returns_365d': self.safe_convert_int(row.get('Last 365 Days Returns')) if pd.notna(row.get('Last 365 Days Returns')) else None,
-                                'star_rating': self.safe_convert_numeric(row.get('Star Rating')) if pd.notna(row.get('Star Rating')) else None,
-                                'total_reviews': self.safe_convert_int(row.get('Total Reviews')) if pd.notna(row.get('Total Reviews')) else None,
-                                'average_price': self.safe_convert_numeric(row.get('Average Price')) if pd.notna(row.get('Average Price')) else None,
-                                'cost_per_unit': self.safe_convert_numeric(row.get('Cost per Unit')) if pd.notna(row.get('Cost per Unit')) else None,
-                                'description': str(row.get('Product Description', ''))
+                                'current_return_rate': self._calculate_return_rate(row),
+                                'metadata': {
+                                    'star_rating': self._safe_convert_numeric(row.get('Star Rating')),
+                                    'total_reviews': self._safe_convert_int(row.get('Total Reviews')),
+                                    'average_price': self._safe_convert_numeric(row.get('Average Price'))
+                                }
                             }
                             
-                            # Validate essential data
-                            if product['asin'] and product['sales_30d'] >= 0:
+                            if product['asin']:
                                 processed_data['products'].append(product)
-                            else:
-                                logger.warning(f"Skipping invalid product: {product['asin']}")
+                                # Initialize feedback collection for this product
+                                processed_data['customer_feedback'][product['asin']] = []
                                 
                         except Exception as e:
                             logger.error(f"Error processing product row: {str(e)}")
                             continue
                     
-                    processed_data['processing_summary']['structured_products'] = len(processed_data['products'])
+                    processed_data['processing_summary']['products_processed'] = len(processed_data['products'])
                 
-                # Process manual reviews and returns
-                for key in ['manual_reviews', 'manual_returns']:
-                    if key in uploaded_data:
-                        processed_data[key.replace('manual_', '')] = uploaded_data[key]
-                        processed_data['processing_summary'][key] = sum(len(data) for data in uploaded_data[key].values())
+                # Process customer feedback (primary focus)
+                feedback_count = 0
                 
-                # Process extracted documents
+                # Process manual reviews as feedback
+                if 'manual_reviews' in uploaded_data:
+                    for asin, reviews in uploaded_data['manual_reviews'].items():
+                        if asin not in processed_data['customer_feedback']:
+                            processed_data['customer_feedback'][asin] = []
+                        
+                        for review in reviews:
+                            feedback_item = {
+                                'type': 'review',
+                                'text': review.get('review_text', ''),
+                                'rating': review.get('rating'),
+                                'date': review.get('date', datetime.now().strftime('%Y-%m-%d')),
+                                'source': 'manual_entry',
+                                'asin': asin
+                            }
+                            processed_data['customer_feedback'][asin].append(feedback_item)
+                            feedback_count += 1
+                
+                # Process manual returns as feedback
+                if 'manual_returns' in uploaded_data:
+                    for asin, returns in uploaded_data['manual_returns'].items():
+                        if asin not in processed_data['customer_feedback']:
+                            processed_data['customer_feedback'][asin] = []
+                        
+                        for return_item in returns:
+                            feedback_item = {
+                                'type': 'return_reason',
+                                'text': return_item.get('return_reason', ''),
+                                'date': return_item.get('date', datetime.now().strftime('%Y-%m-%d')),
+                                'source': 'manual_entry',
+                                'asin': asin
+                            }
+                            processed_data['customer_feedback'][asin].append(feedback_item)
+                            feedback_count += 1
+                
+                # Process extracted documents for feedback
                 if 'documents' in uploaded_data:
-                    doc_reviews, doc_returns = self._process_document_extractions(uploaded_data['documents'])
+                    doc_feedback = self._process_document_feedback(uploaded_data['documents'])
                     
-                    # Merge with existing data
-                    for asin, reviews in doc_reviews.items():
-                        processed_data['reviews'].setdefault(asin, []).extend(reviews)
-                    
-                    for asin, returns in doc_returns.items():
-                        processed_data['returns'].setdefault(asin, []).extend(returns)
+                    for asin, feedback_items in doc_feedback.items():
+                        if asin not in processed_data['customer_feedback']:
+                            processed_data['customer_feedback'][asin] = []
+                        
+                        processed_data['customer_feedback'][asin].extend(feedback_items)
+                        feedback_count += len(feedback_items)
+                
+                processed_data['processing_summary']['total_feedback_items'] = feedback_count
+                
+                # Run text analysis on each product's feedback (core functionality)
+                for asin, feedback_items in processed_data['customer_feedback'].items():
+                    if feedback_items:
+                        try:
+                            # Get product info for analysis
+                            product_info = next((p for p in processed_data['products'] if p['asin'] == asin), 
+                                              {'asin': asin, 'name': f'Product {asin}'})
+                            
+                            # Add product info to each feedback item
+                            for item in feedback_items:
+                                item['product_name'] = product_info['name']
+                                item['asin'] = asin
+                            
+                            # Run core text analysis
+                            text_analysis_result = self.text_analysis_engine.analyze_customer_feedback(
+                                feedback_items, date_filter
+                            )
+                            
+                            processed_data['text_analysis_results'][asin] = text_analysis_result
+                            
+                            logger.info(f"Text analysis completed for {asin}: {len(feedback_items)} items analyzed")
+                            
+                        except Exception as e:
+                            logger.error(f"Text analysis failed for {asin}: {str(e)}")
+                            continue
+                
+                processed_data['processing_summary']['text_analysis_completed'] = len(processed_data['text_analysis_results'])
                 
                 logger.info(f"Data processing complete: {processed_data['processing_summary']}")
                 return processed_data
@@ -272,79 +997,96 @@ class SafeDataProcessor:
                 logger.error(f"Error processing uploaded data: {str(e)}")
                 raise Exception(f"Failed to process uploaded data: {str(e)}")
     
-    def _process_document_extractions(self, documents: List[Dict[str, Any]]) -> Tuple[Dict[str, List], Dict[str, List]]:
-        """Process extracted data from documents"""
-        reviews = {}
-        returns = {}
+    def _calculate_return_rate(self, row: pd.Series) -> float:
+        """Calculate return rate from row data"""
+        try:
+            sales_30d = self._safe_convert_int(row.get('Last 30 Days Sales', 0))
+            returns_30d = self._safe_convert_int(row.get('Last 30 Days Returns', 0))
+            
+            if sales_30d > 0:
+                return round((returns_30d / sales_30d) * 100, 2)
+            else:
+                return 0.0
+        except Exception:
+            return 0.0
+    
+    def _safe_convert_numeric(self, value, default=None):
+        """Safely convert values to numeric"""
+        if pd.isna(value) or value == '' or value is None:
+            return default
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return default
+    
+    def _safe_convert_int(self, value, default=0):
+        """Safely convert values to integer"""
+        numeric_val = self._safe_convert_numeric(value, default)
+        try:
+            return int(numeric_val) if numeric_val is not None else default
+        except (ValueError, TypeError):
+            return default
+    
+    def _process_document_feedback(self, documents: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+        """Process extracted feedback from documents"""
+        
+        feedback_by_asin = defaultdict(list)
         
         for doc in documents:
-            if not doc.get('success') or not doc.get('asin'):
+            if not doc.get('success') or not doc.get('structured_data'):
                 continue
             
-            asin = doc['asin']
+            structured_data = doc['structured_data']
             content_type = doc.get('content_type', '')
-            structured_data = doc.get('structured_data', {})
             
+            # Extract ASIN
+            asin = doc.get('asin') or structured_data.get('primary_asin')
+            if not asin and 'detected_asins' in structured_data:
+                asin = structured_data['detected_asins'][0]
+            
+            if not asin:
+                logger.warning(f"No ASIN found for document {doc.get('filename', 'unknown')}")
+                continue
+            
+            # Process reviews
             if content_type == 'Product Reviews' and 'reviews' in structured_data:
-                reviews.setdefault(asin, []).extend(structured_data['reviews'])
+                for review in structured_data['reviews']:
+                    feedback_item = {
+                        'type': 'review',
+                        'text': review.get('review_text', ''),
+                        'rating': review.get('rating'),
+                        'date': datetime.now().strftime('%Y-%m-%d'),  # Would extract from doc if available
+                        'source': f"document_{doc.get('filename', 'unknown')}",
+                        'asin': asin
+                    }
+                    feedback_by_asin[asin].append(feedback_item)
             
+            # Process returns
             elif content_type == 'Return Reports' and 'returns' in structured_data:
-                returns.setdefault(asin, []).extend(structured_data['returns'])
+                for return_item in structured_data['returns']:
+                    feedback_item = {
+                        'type': 'return_reason',
+                        'text': return_item.get('return_reason', ''),
+                        'date': datetime.now().strftime('%Y-%m-%d'),  # Would extract from doc if available
+                        'source': f"document_{doc.get('filename', 'unknown')}",
+                        'asin': asin
+                    }
+                    feedback_by_asin[asin].append(feedback_item)
         
-        return reviews, returns
+        return dict(feedback_by_asin)
     
-    def calculate_scores(self, processed_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Calculate composite scores with error handling"""
-        if not self.scoring_system:
-            return {}
+    def run_ai_enhancement(self, processed_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Run AI analysis to enhance text analysis results"""
         
-        try:
-            products = processed_data.get('products', [])
-            if not products:
-                logger.warning("No products available for scoring")
-                return {}
-            
-            scores = {}
-            logger.info(f"Calculating scores for {len(products)} products")
-            
-            for product in products:
-                try:
-                    asin = product['asin']
-                    ai_analysis = st.session_state.get('ai_analysis_results', {}).get(asin)
-                    
-                    score = self.scoring_system.score_single_product(
-                        product, 
-                        products,
-                        ai_analysis
-                    )
-                    
-                    scores[asin] = score
-                    logger.debug(f"Calculated score for {asin}: {score.composite_score:.1f}")
-                    
-                except Exception as e:
-                    logger.error(f"Failed to calculate score for {product.get('asin', 'unknown')}: {str(e)}")
-                    continue
-            
-            logger.info(f"Successfully calculated scores for {len(scores)} products")
-            return scores
-            
-        except Exception as e:
-            logger.error(f"Error calculating scores: {str(e)}")
-            return {}
-    
-    def run_ai_analysis(self, processed_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Run AI analysis with proper error handling"""
         if not self.ai_analyzer:
+            logger.warning("AI analyzer not available for enhancement")
             return {}
         
         try:
+            ai_results = {}
+            text_analysis_results = processed_data.get('text_analysis_results', {})
+            customer_feedback = processed_data.get('customer_feedback', {})
             products = processed_data.get('products', [])
-            reviews_data = processed_data.get('reviews', {})
-            returns_data = processed_data.get('returns', {})
-            
-            if not products:
-                logger.warning("No products available for AI analysis")
-                return {}
             
             # Check API status
             api_status = self.ai_analyzer.get_api_status()
@@ -352,60 +1094,73 @@ class SafeDataProcessor:
                 logger.warning(f"AI API not available: {api_status.get('error', 'Unknown error')}")
                 return {}
             
-            ai_results = {}
-            logger.info(f"Running AI analysis for {len(products)} products")
+            logger.info(f"Running AI enhancement for {len(text_analysis_results)} products")
             
-            for product in products:
-                asin = product['asin']
-                
+            for asin, text_result in text_analysis_results.items():
                 try:
-                    product_reviews = reviews_data.get(asin, [])
-                    product_returns = returns_data.get(asin, [])
+                    # Get product info
+                    product = next((p for p in products if p['asin'] == asin), 
+                                 {'asin': asin, 'name': f'Product {asin}', 'category': 'Other'})
                     
-                    if not product_reviews and not product_returns:
-                        logger.debug(f"No review or return data for {asin}, skipping AI analysis")
+                    # Get feedback items
+                    feedback_items = customer_feedback.get(asin, [])
+                    
+                    if not feedback_items:
+                        logger.debug(f"No feedback items for AI enhancement: {asin}")
                         continue
                     
+                    # Convert feedback to format expected by AI analyzer
+                    reviews = [item for item in feedback_items if item['type'] == 'review']
+                    returns = [item for item in feedback_items if item['type'] == 'return_reason']
+                    
+                    # Run comprehensive AI analysis
                     analysis_results = self.ai_analyzer.analyze_product_comprehensive(
-                        product, product_reviews, product_returns
+                        product, reviews, returns
                     )
                     
                     ai_results[asin] = analysis_results
-                    logger.debug(f"Completed AI analysis for {asin}")
+                    logger.debug(f"AI enhancement completed for {asin}")
                     
                 except Exception as e:
-                    logger.error(f"AI analysis failed for {asin}: {str(e)}")
+                    logger.error(f"AI enhancement failed for {asin}: {str(e)}")
                     continue
             
-            logger.info(f"Completed AI analysis for {len(ai_results)} products")
+            logger.info(f"AI enhancement completed for {len(ai_results)} products")
             return ai_results
             
         except Exception as e:
-            logger.error(f"Error running AI analysis: {str(e)}")
+            logger.error(f"Error running AI enhancement: {str(e)}")
             return {}
 
 class SessionManager:
-    """Improved session state management with proper locking"""
+    """Enhanced session management for text analysis workflow"""
     
     @staticmethod
     def initialize_session():
-        """Initialize session state with thread safety"""
+        """Initialize session state for text analysis workflow"""
         default_state = {
-            # Data storage
+            # Core data storage
             'uploaded_data': {},
             'processed_data': {},
-            'scored_products': {},
-            'ai_analysis_results': {},
+            'text_analysis_results': {},
+            'ai_enhancement_results': {},
             
             # UI state
             'current_tab': 0,
             'selected_product': None,
             'show_example_data': False,
             
+            # Date filtering state
+            'date_filter_enabled': False,
+            'date_filter_option': 'last_30_days',
+            'custom_start_date': None,
+            'custom_end_date': None,
+            'active_date_filter': None,
+            
             # Processing state
             'data_processed': False,
-            'scores_calculated': False,
-            'ai_analysis_complete': False,
+            'text_analysis_complete': False,
+            'ai_enhancement_complete': False,
             'processing_locked': False,
             
             # Module status
@@ -417,9 +1172,15 @@ class SessionManager:
             'last_activity': datetime.now(),
             
             # Settings
-            'auto_calculate_scores': True,
-            'auto_run_ai_analysis': False,
+            'auto_run_text_analysis': True,
+            'auto_run_ai_enhancement': False,
             'show_debug_info': False,
+            'focus_mode': 'text_analysis',  # Core focus
+            
+            # Quality management
+            'capa_tracking_enabled': True,
+            'risk_assessment_enabled': True,
+            'iso_compliance_mode': True,
             
             # Error tracking
             'error_count': 0,
@@ -430,7 +1191,7 @@ class SessionManager:
             if key not in st.session_state:
                 st.session_state[key] = value
         
-        logger.info("Session state initialized")
+        logger.info("Session state initialized for text analysis workflow")
     
     @staticmethod
     def update_activity():
@@ -438,70 +1199,88 @@ class SessionManager:
         st.session_state.last_activity = datetime.now()
     
     @staticmethod
-    def check_session_timeout():
-        """Check if session has timed out"""
-        if 'last_activity' in st.session_state:
-            time_diff = datetime.now() - st.session_state.last_activity
-            hours_inactive = time_diff.total_seconds() / 3600
-            
-            if hours_inactive > APP_CONFIG['session_timeout_hours']:
-                logger.warning(f"Session timeout after {hours_inactive:.1f} hours of inactivity")
-                return True
+    def get_active_date_filter() -> Optional[Dict[str, Any]]:
+        """Get active date filter configuration"""
         
-        return False
-    
-    @staticmethod
-    def safe_state_update(key: str, value: Any, force: bool = False):
-        """Safely update session state with locking"""
-        if force or not st.session_state.get('processing_locked', False):
-            st.session_state[key] = value
-            return True
-        return False
+        if not st.session_state.get('date_filter_enabled', False):
+            return None
+        
+        filter_option = st.session_state.get('date_filter_option', 'last_30_days')
+        
+        if filter_option == 'custom':
+            start_date = st.session_state.get('custom_start_date')
+            end_date = st.session_state.get('custom_end_date')
+            
+            if start_date and end_date:
+                return {
+                    'start_date': start_date,
+                    'end_date': end_date,
+                    'label': f"Custom: {start_date} to {end_date}"
+                }
+            else:
+                return None
+        else:
+            # Predefined date range
+            if filter_option in DATE_FILTER_OPTIONS:
+                days = DATE_FILTER_OPTIONS[filter_option]['days']
+                end_date = datetime.now().date()
+                start_date = end_date - timedelta(days=days)
+                
+                return {
+                    'start_date': start_date,
+                    'end_date': end_date,
+                    'label': DATE_FILTER_OPTIONS[filter_option]['label']
+                }
+        
+        return None
     
     @staticmethod
     def load_example_data():
-        """Load example data for demonstration"""
+        """Load example data focused on customer feedback analysis"""
         try:
-            logger.info("Loading example data")
+            logger.info("Loading example customer feedback data")
             
-            # Convert example data to proper format
-            example_df = pd.DataFrame(EXAMPLE_DATA['products'])
-            
-            # Rename columns to match expected format
-            column_mapping = {
-                'asin': 'ASIN',
-                'name': 'Product Name',
-                'category': 'Category',
-                'sku': 'SKU',
-                'sales_30d': 'Last 30 Days Sales',
-                'returns_30d': 'Last 30 Days Returns',
-                'sales_365d': 'Last 365 Days Sales',
-                'returns_365d': 'Last 365 Days Returns',
-                'star_rating': 'Star Rating',
-                'total_reviews': 'Total Reviews',
-                'average_price': 'Average Price',
-                'cost_per_unit': 'Cost per Unit',
-                'description': 'Product Description'
-            }
-            
-            example_df = example_df.rename(columns=column_mapping)
-            
-            # Store in session state
+            # Convert example data to expected format
             st.session_state.uploaded_data = {
-                'structured_data': example_df,
-                'manual_reviews': EXAMPLE_DATA['reviews'],
-                'manual_returns': EXAMPLE_DATA['returns']
+                'structured_data': pd.DataFrame(EXAMPLE_FEEDBACK_DATA['products']),
+                'manual_reviews': {},
+                'manual_returns': {}
             }
+            
+            # Convert customer feedback to manual entry format
+            for asin, feedback_items in EXAMPLE_FEEDBACK_DATA['customer_feedback'].items():
+                reviews = []
+                returns = []
+                
+                for item in feedback_items:
+                    if item['type'] == 'review':
+                        reviews.append({
+                            'rating': item.get('rating'),
+                            'review_text': item['text'],
+                            'date': item['date'],
+                            'asin': asin
+                        })
+                    elif item['type'] == 'return_reason':
+                        returns.append({
+                            'return_reason': item['text'],
+                            'date': item['date'],
+                            'asin': asin
+                        })
+                
+                if reviews:
+                    st.session_state.uploaded_data['manual_reviews'][asin] = reviews
+                if returns:
+                    st.session_state.uploaded_data['manual_returns'][asin] = returns
             
             st.session_state.show_example_data = True
-            logger.info("Example data loaded successfully")
+            logger.info("Example customer feedback data loaded successfully")
             
         except Exception as e:
             logger.error(f"Failed to load example data: {str(e)}")
             st.error(f"Failed to load example data: {str(e)}")
 
 class ApplicationController:
-    """Main application controller with improved error handling"""
+    """Main application controller focused on text analysis workflow"""
     
     def __init__(self):
         self.data_processor = SafeDataProcessor()
@@ -511,7 +1290,7 @@ class ApplicationController:
         if dashboard_available:
             try:
                 self.dashboard = ProfessionalDashboard()
-                logger.info("Dashboard initialized")
+                logger.info("Dashboard initialized for text analysis workflow")
             except Exception as e:
                 logger.error(f"Failed to initialize dashboard: {str(e)}")
         
@@ -538,7 +1317,7 @@ class ApplicationController:
             logger.error(f"Error updating module status: {str(e)}")
     
     def handle_data_upload(self, upload_type: str, data: Any) -> bool:
-        """Handle different types of data uploads with proper error handling"""
+        """Handle different types of data uploads with text analysis focus"""
         try:
             SessionManager.update_activity()
             
@@ -553,37 +1332,42 @@ class ApplicationController:
                 result = self.data_processor.upload_handler.process_structured_file(file_data, filename)
                 
                 if result['success']:
-                    # Merge with existing data
                     if 'structured_data' not in st.session_state.uploaded_data:
                         st.session_state.uploaded_data['structured_data'] = result['data']
                     else:
                         existing_df = st.session_state.uploaded_data['structured_data']
-                        combined_df = self._safe_concat_dataframes(existing_df, result['data'])
+                        combined_df = pd.concat([existing_df, result['data']], ignore_index=True)
                         st.session_state.uploaded_data['structured_data'] = combined_df
                     
                     st.success(f"✅ Successfully uploaded {filename}")
                     success = True
                 else:
                     errors = result.get('errors', ['Unknown error'])
-                    error_msg = '; '.join([str(e) if isinstance(e, str) else e.get('message', str(e)) for e in errors])
-                    st.error(f"❌ Upload failed: {error_msg}")
+                    st.error(f"❌ Upload failed: {'; '.join([str(e) for e in errors])}")
             
             elif upload_type == 'manual_entry':
                 result = self.data_processor.upload_handler.process_manual_entry(data)
                 
                 if result['success']:
-                    # Convert to DataFrame format and add to structured data
                     manual_data = result['data']
-                    df_row = self._convert_manual_to_df_row(manual_data)
                     
                     # Add to structured data
+                    df_row = {
+                        'ASIN': manual_data['asin'],
+                        'Product Name': manual_data.get('product_name', ''),
+                        'Category': manual_data.get('category', ''),
+                        'SKU': manual_data.get('sku', ''),
+                        'Last 30 Days Sales': manual_data.get('sales_30d', 0),
+                        'Last 30 Days Returns': manual_data.get('returns_30d', 0)
+                    }
+                    
                     if 'structured_data' not in st.session_state.uploaded_data:
                         st.session_state.uploaded_data['structured_data'] = pd.DataFrame([df_row])
                     else:
                         existing_df = st.session_state.uploaded_data['structured_data']
                         # Remove existing entry with same ASIN if present
                         existing_df = existing_df[existing_df['ASIN'] != manual_data['asin']]
-                        new_df = self._safe_concat_dataframes(existing_df, pd.DataFrame([df_row]))
+                        new_df = pd.concat([existing_df, pd.DataFrame([df_row])], ignore_index=True)
                         st.session_state.uploaded_data['structured_data'] = new_df
                     
                     st.success(f"✅ Product {manual_data['asin']} saved successfully")
@@ -622,47 +1406,8 @@ class ApplicationController:
             st.error(f"❌ Upload error: {str(e)}")
             return False
     
-    def _safe_concat_dataframes(self, df1: pd.DataFrame, df2: pd.DataFrame) -> pd.DataFrame:
-        """Safely concatenate DataFrames with schema compatibility"""
-        if df1.empty:
-            return df2
-        if df2.empty:
-            return df1
-        
-        # Ensure all columns exist in both DataFrames
-        all_columns = set(df1.columns) | set(df2.columns)
-        for col in all_columns:
-            if col not in df1.columns:
-                df1[col] = None
-            if col not in df2.columns:
-                df2[col] = None
-        
-        # Reorder columns to match
-        df1 = df1.reindex(columns=sorted(all_columns))
-        df2 = df2.reindex(columns=sorted(all_columns))
-        
-        return pd.concat([df1, df2], ignore_index=True)
-    
-    def _convert_manual_to_df_row(self, manual_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Convert manual entry data to DataFrame row format"""
-        return {
-            'ASIN': manual_data['asin'],
-            'Product Name': manual_data.get('product_name', ''),
-            'Category': manual_data.get('category', ''),
-            'SKU': manual_data.get('sku', ''),
-            'Last 30 Days Sales': manual_data.get('sales_30d', 0),
-            'Last 30 Days Returns': manual_data.get('returns_30d', 0),
-            'Last 365 Days Sales': manual_data.get('sales_365d'),
-            'Last 365 Days Returns': manual_data.get('returns_365d'),
-            'Star Rating': manual_data.get('star_rating'),
-            'Total Reviews': manual_data.get('total_reviews'),
-            'Average Price': manual_data.get('average_price'),
-            'Cost per Unit': manual_data.get('cost_per_unit'),
-            'Product Description': manual_data.get('description', '')
-        }
-    
     def process_data(self) -> bool:
-        """Process all uploaded data with improved error handling"""
+        """Process all uploaded data with text analysis focus"""
         try:
             SessionManager.update_activity()
             
@@ -670,21 +1415,36 @@ class ApplicationController:
                 st.warning("No data to process. Please upload data first.")
                 return False
             
+            # Get active date filter
+            date_filter = SessionManager.get_active_date_filter()
+            
             # Set processing lock
             st.session_state.processing_locked = True
             
             try:
-                with st.spinner("Processing uploaded data..."):
-                    processed_data = self.data_processor.process_uploaded_data(st.session_state.uploaded_data)
+                with st.spinner("Processing data and analyzing customer feedback..."):
+                    processed_data = self.data_processor.process_uploaded_data(
+                        st.session_state.uploaded_data, date_filter
+                    )
                     st.session_state.processed_data = processed_data
+                    st.session_state.text_analysis_results = processed_data.get('text_analysis_results', {})
                     st.session_state.data_processed = True
+                    st.session_state.text_analysis_complete = True
+                    st.session_state.active_date_filter = date_filter
                 
-                # Auto-calculate scores if enabled
-                if st.session_state.auto_calculate_scores and processed_data.get('products'):
-                    self.calculate_scores()
+                # Auto-run AI enhancement if enabled
+                if st.session_state.auto_run_ai_enhancement and processed_data.get('text_analysis_results'):
+                    self.run_ai_enhancement()
                 
                 summary = processed_data.get('processing_summary', {})
-                st.success(f"✅ Data processing complete! Processed {summary.get('structured_products', 0)} products")
+                feedback_count = summary.get('total_feedback_items', 0)
+                analysis_count = summary.get('text_analysis_completed', 0)
+                
+                success_msg = f"✅ Text analysis complete! Processed {feedback_count} feedback items across {analysis_count} products"
+                if date_filter:
+                    success_msg += f"\n📅 Date filter applied: {date_filter['label']}"
+                
+                st.success(success_msg)
                 return True
                 
             finally:
@@ -697,138 +1457,40 @@ class ApplicationController:
             st.session_state.processing_locked = False
             return False
     
-    def calculate_scores(self) -> bool:
-        """Calculate composite scores with proper error handling"""
-        try:
-            SessionManager.update_activity()
-            
-            if not st.session_state.data_processed or not st.session_state.processed_data:
-                st.warning("Please process data first before calculating scores.")
-                return False
-            
-            with st.spinner("Calculating performance scores..."):
-                scores = self.data_processor.calculate_scores(st.session_state.processed_data)
-                st.session_state.scored_products = scores
-                st.session_state.scores_calculated = True
-            
-            if scores:
-                try:
-                    avg_score = np.mean([score.composite_score for score in scores.values()])
-                    st.success(f"✅ Calculated scores for {len(scores)} products (Avg: {avg_score:.1f}/100)")
-                    return True
-                except Exception as e:
-                    logger.warning(f"Error calculating average score: {str(e)}")
-                    st.success(f"✅ Calculated scores for {len(scores)} products")
-                    return True
-            else:
-                st.warning("No scores calculated. Check that you have valid product data.")
-                return False
-            
-        except Exception as e:
-            logger.error(f"Error calculating scores: {str(e)}")
-            st.error(f"❌ Score calculation failed: {str(e)}")
-            return False
-    
-    def run_ai_analysis(self) -> bool:
-        """Run AI analysis with proper error handling"""
+    def run_ai_enhancement(self) -> bool:
+        """Run AI enhancement on text analysis results"""
         try:
             SessionManager.update_activity()
             
             if not st.session_state.api_status.get('available', False):
-                st.error("❌ AI analysis not available. Please check your API configuration.")
+                st.error("❌ AI enhancement not available. Please check your API configuration.")
                 return False
             
-            if not st.session_state.data_processed or not st.session_state.processed_data:
-                st.warning("Please process data first before running AI analysis.")
+            if not st.session_state.text_analysis_complete or not st.session_state.processed_data:
+                st.warning("Please run text analysis first before AI enhancement.")
                 return False
             
-            with st.spinner("Running AI analysis... This may take a few minutes."):
-                ai_results = self.data_processor.run_ai_analysis(st.session_state.processed_data)
-                st.session_state.ai_analysis_results = ai_results
-                st.session_state.ai_analysis_complete = True
+            with st.spinner("Running AI enhancement on text analysis... This may take a few minutes."):
+                ai_results = self.data_processor.run_ai_enhancement(st.session_state.processed_data)
+                st.session_state.ai_enhancement_results = ai_results
+                st.session_state.ai_enhancement_complete = True
             
             if ai_results:
-                st.success(f"✅ AI analysis complete for {len(ai_results)} products")
+                st.success(f"✅ AI enhancement complete for {len(ai_results)} products")
                 return True
             else:
-                st.warning("No AI analysis results generated. Check that you have review or return data.")
+                st.warning("No AI enhancement results generated. Check that you have customer feedback data.")
                 return False
             
         except Exception as e:
-            logger.error(f"Error running AI analysis: {str(e)}")
-            st.error(f"❌ AI analysis failed: {str(e)}")
+            logger.error(f"Error running AI enhancement: {str(e)}")
+            st.error(f"❌ AI enhancement failed: {str(e)}")
             return False
     
-    def export_results(self, export_format: str = 'excel') -> Optional[bytes]:
-        """Export analysis results with proper error handling"""
-        try:
-            SessionManager.update_activity()
-            
-            if not st.session_state.scored_products:
-                st.warning("No scored products available for export.")
-                return None
-            
-            if not scoring_available:
-                st.error("Scoring module not available for export.")
-                return None
-            
-            with st.spinner(f"Generating {export_format} export..."):
-                if export_format == 'excel':
-                    scores_df = self.data_processor.scoring_system.export_scores(
-                        st.session_state.scored_products, 'dataframe'
-                    )
-                    
-                    # Create Excel file in memory
-                    output = io.BytesIO()
-                    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                        scores_df.to_excel(writer, sheet_name='Product Scores', index=False)
-                        
-                        # Add summary sheet
-                        try:
-                            summary_data = {
-                                'Metric': ['Total Products', 'Average Score', 'Top Performers (70+)', 'Needs Improvement (<55)'],
-                                'Value': [
-                                    len(st.session_state.scored_products),
-                                    f"{np.mean([s.composite_score for s in st.session_state.scored_products.values()]):.1f}",
-                                    len([s for s in st.session_state.scored_products.values() if s.composite_score >= 70]),
-                                    len([s for s in st.session_state.scored_products.values() if s.composite_score < 55])
-                                ]
-                            }
-                            
-                            summary_df = pd.DataFrame(summary_data)
-                            summary_df.to_excel(writer, sheet_name='Summary', index=False)
-                        except Exception as e:
-                            logger.warning(f"Could not create summary sheet: {str(e)}")
-                    
-                    output.seek(0)
-                    return output.getvalue()
-                
-                elif export_format == 'json':
-                    export_data = self.data_processor.scoring_system.export_scores(
-                        st.session_state.scored_products, 'detailed_report'
-                    )
-                    return json.dumps(export_data, indent=2, default=str).encode('utf-8')
-                
-                else:
-                    st.error(f"Unsupported export format: {export_format}")
-                    return None
-            
-        except Exception as e:
-            logger.error(f"Error exporting results: {str(e)}")
-            st.error(f"❌ Export failed: {str(e)}")
-            return None
-    
     def run_application(self):
-        """Main application entry point with comprehensive error handling"""
+        """Main application entry point focused on text analysis workflow"""
         try:
-            # Check for session timeout
-            if SessionManager.check_session_timeout():
-                st.warning("⏰ Session has timed out due to inactivity. Please refresh the page.")
-                if st.button("🔄 Refresh Session"):
-                    st.rerun()
-                return
-            
-            # Dashboard available - proceed with rendering
+            # Dashboard available - proceed with text analysis focused rendering
             if not self.dashboard:
                 self._render_minimal_interface()
                 return
@@ -840,9 +1502,9 @@ class ApplicationController:
                     self.process_data()
                 st.session_state['load_example'] = False
             
-            # Render main dashboard
+            # Render main text analysis dashboard
             try:
-                self.dashboard.render_main_dashboard()
+                self.dashboard.render_text_analysis_dashboard()
             except Exception as e:
                 logger.error(f"Dashboard rendering error: {str(e)}")
                 st.error(f"Dashboard error: {str(e)}")
@@ -858,7 +1520,7 @@ class ApplicationController:
     
     def _render_minimal_interface(self):
         """Render minimal interface when dashboard is not available"""
-        st.title("🏥 Amazon Medical Device Listing Optimizer")
+        st.title("🏥 Medical Device Customer Feedback Analyzer")
         st.error("⚠️ Dashboard module not available. Using minimal interface.")
         
         st.markdown("### System Status")
@@ -875,11 +1537,8 @@ class ApplicationController:
             success = self.handle_data_upload('structured_file', (file_data, uploaded_file.name))
             
             if success:
-                if st.button("Process Data"):
+                if st.button("Process Data & Analyze Text"):
                     self.process_data()
-                
-                if st.session_state.data_processed and st.button("Calculate Scores"):
-                    self.calculate_scores()
     
     def _render_error_interface(self, error_message: str):
         """Render error interface when critical errors occur"""
@@ -891,8 +1550,8 @@ class ApplicationController:
             st.markdown(f"""
             **System Information:**
             - App Version: {APP_CONFIG['version']}
-            - Python Version: {APP_CONFIG['python_version']}
-            - Streamlit Version: {APP_CONFIG['streamlit_version']}
+            - Focus: {APP_CONFIG['focus']}
+            - Compliance: {APP_CONFIG['compliance']}
             
             **Module Status:**
             """)
@@ -902,103 +1561,40 @@ class ApplicationController:
                 st.markdown(f"- {module}: {status}")
             
             st.markdown(f"""
-            **Common Solutions:**
-            1. Refresh the page and try again
-            2. Clear your browser cache
-            3. Check that all required modules are installed
-            4. Verify API key configuration
-            5. Contact support if the issue persists
-            
             **Support:** {APP_CONFIG['support_email']}
             """)
     
     def _handle_processing_triggers(self):
-        """Handle background processing triggers with proper error handling"""
+        """Handle background processing triggers"""
         try:
             # Auto-process data if new uploads detected
             if (st.session_state.uploaded_data and 
                 not st.session_state.data_processed and 
                 not st.session_state.get('processing_locked', False)):
                 
-                logger.info("Auto-processing new data")
+                logger.info("Auto-processing new data for text analysis")
                 if self.process_data():
                     st.rerun()
             
-            # Handle individual AI analysis trigger
-            if 'run_individual_ai_analysis' in st.session_state:
-                target_asin = st.session_state['run_individual_ai_analysis']
-                del st.session_state['run_individual_ai_analysis']
+            # Handle date filter changes
+            if 'date_filter_changed' in st.session_state:
+                del st.session_state['date_filter_changed']
                 
-                if self._run_individual_ai_analysis(target_asin):
-                    st.success(f"✅ AI analysis complete for {target_asin}")
-                    st.rerun()
-            
-            # Handle bulk AI analysis trigger
-            if 'run_bulk_ai_analysis' in st.session_state:
-                del st.session_state['run_bulk_ai_analysis']
-                
-                if self.run_ai_analysis():
-                    st.rerun()
-                    
+                if st.session_state.data_processed:
+                    logger.info("Re-processing data due to date filter change")
+                    if self.process_data():
+                        st.rerun()
+                        
         except Exception as e:
             logger.error(f"Error in processing triggers: {str(e)}")
-    
-    def _run_individual_ai_analysis(self, target_asin: str) -> bool:
-        """Run AI analysis for a specific product with error handling"""
-        try:
-            if not st.session_state.data_processed or not st.session_state.processed_data:
-                st.error("No processed data available for AI analysis.")
-                return False
-            
-            if not st.session_state.api_status.get('available', False):
-                st.error("❌ AI analysis not available. Please check your API configuration.")
-                return False
-            
-            processed_data = st.session_state.processed_data
-            products = processed_data.get('products', [])
-            reviews_data = processed_data.get('reviews', {})
-            returns_data = processed_data.get('returns', {})
-            
-            # Find target product
-            target_product = next((p for p in products if p['asin'] == target_asin), None)
-            if not target_product:
-                st.error(f"Product {target_asin} not found in processed data.")
-                return False
-            
-            # Get data for this product
-            product_reviews = reviews_data.get(target_asin, [])
-            product_returns = returns_data.get(target_asin, [])
-            
-            if not product_reviews and not product_returns:
-                st.warning(f"No review or return data found for {target_asin}. AI analysis requires customer feedback data.")
-                return False
-            
-            with st.spinner(f"Running AI analysis for {target_product['name']}..."):
-                analysis_results = self.data_processor.ai_analyzer.analyze_product_comprehensive(
-                    target_product, product_reviews, product_returns
-                )
-                
-                # Store results
-                if target_asin not in st.session_state.ai_analysis_results:
-                    st.session_state.ai_analysis_results[target_asin] = {}
-                
-                st.session_state.ai_analysis_results[target_asin] = analysis_results
-                st.session_state.ai_analysis_complete = True
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error running individual AI analysis for {target_asin}: {str(e)}")
-            st.error(f"❌ AI analysis failed for {target_asin}: {str(e)}")
-            return False
 
 def main():
-    """Application entry point with comprehensive error handling"""
+    """Application entry point focused on customer feedback text analysis"""
     try:
-        # Set Streamlit page config
+        # Set Streamlit page config for text analysis workflow
         st.set_page_config(
             page_title=APP_CONFIG['title'],
-            page_icon="🏥",
+            page_icon="🔍",
             layout="wide",
             initial_sidebar_state="expanded"
         )
@@ -1020,11 +1616,7 @@ def main():
         **Emergency Support:**
         - Email: {APP_CONFIG['support_email']}
         - Version: {APP_CONFIG['version']}
-        
-        **Quick Actions:**
-        1. Refresh the page
-        2. Clear browser cache
-        3. Check Python/Streamlit versions
+        - Focus: {APP_CONFIG['focus']}
         """)
 
 if __name__ == "__main__":
