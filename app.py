@@ -123,9 +123,13 @@ def display_ai_status():
 
 def display_ai_chat():
     """Display AI chat interface"""
-    if not st.session_state.show_chat or not chat_available:
+    if not st.session_state.show_chat:
         return
     
+    if not chat_available:
+        st.error("❌ AI Chat module not available")
+        return
+        
     with st.expander("💬 AI Listing Optimization Chat", expanded=True):
         col1, col2 = st.columns([5, 1])
         
@@ -139,38 +143,77 @@ def display_ai_chat():
         
         # Initialize chat session if needed
         if st.session_state.chat_session is None and chat_available:
-            st.session_state.chat_session = ai_chat.ChatSession('listing_optimizer')
+            try:
+                st.session_state.chat_session = ai_chat.ChatSession('listing_optimizer')
+            except Exception as e:
+                st.error(f"Failed to initialize chat: {str(e)}")
+                return
+        
+        # Add context about current analysis to chat
+        if st.session_state.analysis_results and st.session_state.chat_session:
+            # Prepare context message for the AI
+            context_info = []
+            results = st.session_state.analysis_results
+            
+            if results.get('review_categories'):
+                categories = results['review_categories']
+                top_issues = sorted(categories.items(), key=lambda x: x[1]['count'], reverse=True)[:3]
+                context_info.append("Current Analysis Context:")
+                context_info.append(f"- Total reviews analyzed: {results.get('reviews_analyzed', 0)}")
+                for category_key, category_data in top_issues:
+                    category_name = category_key.replace('_', ' ').title()
+                    context_info.append(f"- {category_name}: {category_data['count']} reviews")
+            
+            if context_info and len(st.session_state.chat_session.messages) == 0:
+                # Add initial context message
+                context_message = "\n".join(context_info)
+                st.session_state.chat_session.add_assistant_message(
+                    f"I can see you've just completed an analysis. Here's what I found:\n\n{context_message}\n\nHow can I help you interpret these results or improve your listing?"
+                )
         
         # Chat interface
         if st.session_state.chat_session:
             # Display chat history
-            for message in st.session_state.chat_session.messages[-10:]:  # Show last 10 messages
-                role = message['role']
-                content = message['content']
-                
-                if role == 'user':
-                    with st.chat_message("user"):
-                        st.markdown(content)
+            chat_container = st.container()
+            
+            with chat_container:
+                if not st.session_state.chat_session.messages:
+                    st.info("👋 Hi! I'm your Amazon listing optimization expert. Ask me anything about improving your listings!")
                 else:
-                    with st.chat_message("assistant"):
-                        st.markdown(content)
+                    # Display conversation
+                    for message in st.session_state.chat_session.messages[-10:]:  # Show last 10 messages
+                        role = message['role']
+                        content = message['content']
+                        
+                        if role == 'user':
+                            with st.chat_message("user"):
+                                st.markdown(content)
+                        else:
+                            with st.chat_message("assistant"):
+                                st.markdown(content)
             
             # Chat input
             user_input = st.chat_input("Ask about listing optimization...")
             
             if user_input:
                 # Add context about current analysis if available
-                context_message = user_input
+                enhanced_message = user_input
                 if st.session_state.analysis_results:
-                    context_message = f"Context: I'm analyzing Amazon reviews for listing optimization. Current question: {user_input}"
+                    enhanced_message = f"Based on my current review analysis, {user_input}"
                 
+                # Display user message immediately
                 with st.chat_message("user"):
                     st.markdown(user_input)
                 
+                # Get AI response
                 with st.chat_message("assistant"):
                     with st.spinner("Thinking..."):
-                        response = st.session_state.chat_session.send_message(context_message)
-                    st.markdown(response)
+                        try:
+                            response = st.session_state.chat_session.send_message(enhanced_message)
+                            st.markdown(response)
+                        except Exception as e:
+                            st.error(f"Chat error: {str(e)}")
+                            st.markdown("I'm having trouble right now. Please check your API configuration.")
                 
                 st.rerun()
 
@@ -450,16 +493,24 @@ def run_ai_analysis():
         st.session_state.processing = False
 
 def analyze_for_listing_optimization(product_info, reviews):
-    """Run comprehensive AI analysis focused on listing optimization"""
+    """Run comprehensive AI analysis focused on listing optimization - ALL REVIEWS"""
     try:
-        # Prepare comprehensive review analysis
-        review_summaries = []
-        for review in reviews[:30]:  # Use more reviews for better analysis
-            summary = f"Rating: {review['rating']}/5 stars\n"
-            summary += f"Title: {review.get('title', '')}\n"
-            summary += f"Review: {review.get('body', '')}\n"
-            summary += f"Verified: {'Yes' if review.get('verified') else 'No'}\n"
-            review_summaries.append(summary)
+        # Process ALL reviews, not just a subset
+        st.info(f"🔍 Analyzing ALL {len(reviews)} reviews for comprehensive insights...")
+        
+        # Prepare ALL reviews for analysis
+        all_review_data = []
+        for i, review in enumerate(reviews):
+            review_data = {
+                'id': i + 1,
+                'rating': review['rating'],
+                'title': review.get('title', ''),
+                'body': review.get('body', ''),
+                'verified': review.get('verified', False),
+                'date': review.get('date', ''),
+                'author': review.get('author', '')
+            }
+            all_review_data.append(review_data)
         
         # Include current listing context if available
         listing_context = ""
@@ -470,50 +521,165 @@ def analyze_for_listing_optimization(product_info, reviews):
             if st.session_state.current_listing_description:
                 listing_context += f"Current Description: {st.session_state.current_listing_description}\n"
         
-        # Use your existing AI analyzer with enhanced prompts
-        prompt = f"""
-        Analyze these Amazon customer reviews for comprehensive listing optimization insights.
+        # Run categorization analysis
+        categorization_result = categorize_all_reviews(all_review_data, product_info, listing_context)
         
-        Product ASIN: {product_info.get('asin', 'Unknown')}
-        Total Reviews: {len(review_summaries)}
-        {listing_context}
-        
-        CUSTOMER REVIEWS:
-        {chr(10).join(review_summaries)}
-        
-        Provide detailed analysis in structured format focusing on:
-        
-        1. LISTING OPTIMIZATION RECOMMENDATIONS
-        2. CUSTOMER SENTIMENT ANALYSIS  
-        3. CONTENT GAPS AND OPPORTUNITIES
-        4. COMPETITIVE POSITIONING INSIGHTS
-        5. IMMEDIATE ACTION ITEMS
-        
-        Format your response clearly with headers and bullet points for easy reading.
-        """
-        
-        # Call your AI analyzer
-        result = st.session_state.ai_analyzer.analyze_reviews_comprehensive(
+        # Run comprehensive analysis using your existing analyzer
+        comprehensive_result = st.session_state.ai_analyzer.analyze_reviews_comprehensive(
             product_info, 
-            reviews
+            reviews  # Pass all reviews
         )
         
-        if result.get('success'):
+        if categorization_result.get('success') and comprehensive_result.get('success'):
             return {
                 'success': True,
-                'ai_analysis': result,
-                'reviews_analyzed': len(review_summaries),
+                'ai_analysis': comprehensive_result,
+                'review_categories': categorization_result['categories'],
+                'reviews_analyzed': len(reviews),
                 'timestamp': datetime.now().isoformat(),
                 'has_listing_context': bool(listing_context)
             }
         else:
             return {
                 'success': False,
-                'error': result.get('error', 'AI analysis failed')
+                'error': 'Analysis failed'
             }
             
     except Exception as e:
         logger.error(f"Analysis error: {str(e)}")
+        return {
+            'success': False,
+            'error': str(e)
+        }
+
+def categorize_all_reviews(all_reviews, product_info, listing_context=""):
+    """Categorize ALL reviews into specific complaint/praise categories"""
+    try:
+        # Create batches for large review sets to avoid token limits
+        batch_size = 100  # Process 100 reviews at a time
+        all_categories = {}
+        
+        for i in range(0, len(all_reviews), batch_size):
+            batch = all_reviews[i:i + batch_size]
+            
+            # Prepare batch for analysis
+            batch_text = ""
+            for review in batch:
+                batch_text += f"Review {review['id']}: Rating {review['rating']}/5\n"
+                batch_text += f"Title: {review['title']}\n"
+                batch_text += f"Body: {review['body']}\n"
+                batch_text += f"Verified: {review['verified']}\n---\n"
+            
+            categorization_prompt = f"""
+            Categorize these Amazon customer reviews into specific complaint and praise categories.
+            
+            Product ASIN: {product_info.get('asin', 'Unknown')}
+            Batch: Reviews {i+1} to {min(i+batch_size, len(all_reviews))}
+            {listing_context}
+            
+            REVIEWS TO CATEGORIZE:
+            {batch_text}
+            
+            Return a JSON object with categories and their details:
+            {{
+                "size_issues": {{
+                    "count": 0,
+                    "reviews": ["Review ID: quote from review"],
+                    "trend": "most common size complaint"
+                }},
+                "quality_issues": {{
+                    "count": 0,
+                    "reviews": ["Review ID: quote from review"],
+                    "trend": "most common quality complaint"
+                }},
+                "noise_issues": {{
+                    "count": 0,
+                    "reviews": ["Review ID: quote from review"],
+                    "trend": "noise-related complaints"
+                }},
+                "fit_issues": {{
+                    "count": 0,
+                    "reviews": ["Review ID: quote from review"],
+                    "trend": "fit/compatibility issues"
+                }},
+                "durability_issues": {{
+                    "count": 0,
+                    "reviews": ["Review ID: quote from review"],
+                    "trend": "durability/longevity complaints"
+                }},
+                "ease_of_use": {{
+                    "count": 0,
+                    "reviews": ["Review ID: quote from review"],
+                    "trend": "usability complaints or praise"
+                }},
+                "value_for_money": {{
+                    "count": 0,
+                    "reviews": ["Review ID: quote from review"],
+                    "trend": "price/value concerns"
+                }},
+                "shipping_packaging": {{
+                    "count": 0,
+                    "reviews": ["Review ID: quote from review"],
+                    "trend": "shipping or packaging issues"
+                }},
+                "customer_service": {{
+                    "count": 0,
+                    "reviews": ["Review ID: quote from review"],
+                    "trend": "customer service experiences"
+                }},
+                "positive_highlights": {{
+                    "count": 0,
+                    "reviews": ["Review ID: quote from review"],
+                    "trend": "most praised features"
+                }}
+            }}
+            
+            Only include categories that have actual reviews. Set count to 0 for categories with no relevant reviews.
+            """
+            
+            # Call AI for this batch
+            batch_result = st.session_state.ai_analyzer.api_client.call_api([
+                {"role": "system", "content": "You are an expert at categorizing customer feedback into actionable categories for listing optimization."},
+                {"role": "user", "content": categorization_prompt}
+            ])
+            
+            if batch_result['success']:
+                try:
+                    batch_categories = json.loads(batch_result['result'])
+                    
+                    # Merge batch results with overall results
+                    for category, data in batch_categories.items():
+                        if category not in all_categories:
+                            all_categories[category] = {
+                                'count': 0,
+                                'reviews': [],
+                                'trend': ''
+                            }
+                        
+                        all_categories[category]['count'] += data.get('count', 0)
+                        all_categories[category]['reviews'].extend(data.get('reviews', []))
+                        if data.get('trend') and data['count'] > 0:
+                            all_categories[category]['trend'] = data['trend']
+                
+                except json.JSONDecodeError:
+                    st.warning(f"Could not parse categorization for batch {i//batch_size + 1}")
+                    continue
+            
+            # Update progress
+            progress = min(i + batch_size, len(all_reviews))
+            st.info(f"📊 Processed {progress}/{len(all_reviews)} reviews...")
+        
+        # Filter out empty categories
+        filtered_categories = {k: v for k, v in all_categories.items() if v['count'] > 0}
+        
+        return {
+            'success': True,
+            'categories': filtered_categories,
+            'total_categorized': sum(cat['count'] for cat in filtered_categories.values())
+        }
+        
+    except Exception as e:
+        logger.error(f"Categorization error: {str(e)}")
         return {
             'success': False,
             'error': str(e)
@@ -601,6 +767,10 @@ def display_comprehensive_ai_results(results):
         else:
             st.metric("Listing Context", "❌ Not Provided")
     
+    # Review Categories Section - NEW!
+    if results.get('review_categories'):
+        display_review_categories(results['review_categories'])
+    
     # Main analysis sections
     if ai_analysis.get('listing_improvements'):
         st.markdown("### 🎯 Listing Optimization Recommendations")
@@ -631,6 +801,83 @@ def display_comprehensive_ai_results(results):
             st.text(ai_analysis['raw_response'])
         else:
             st.json(ai_analysis)
+
+def display_review_categories(categories):
+    """Display categorized review analysis"""
+    st.markdown("### 📊 Review Categories Analysis")
+    st.markdown("**Customer feedback organized by common themes and issues**")
+    
+    # Create tabs for different category types
+    tab1, tab2 = st.tabs(["🔴 Issues & Complaints", "🟢 Positive Feedback"])
+    
+    with tab1:
+        # Negative categories
+        negative_categories = [
+            'size_issues', 'quality_issues', 'noise_issues', 'fit_issues', 
+            'durability_issues', 'value_for_money', 'shipping_packaging'
+        ]
+        
+        issue_found = False
+        for category_key in negative_categories:
+            if category_key in categories and categories[category_key]['count'] > 0:
+                issue_found = True
+                category_data = categories[category_key]
+                
+                # Format category name
+                category_name = category_key.replace('_', ' ').title()
+                
+                with st.expander(f"🔴 {category_name} ({category_data['count']} reviews)", expanded=category_data['count'] > 5):
+                    st.markdown(f"**Most Common Trend:** {category_data['trend']}")
+                    
+                    st.markdown("**Example Reviews:**")
+                    for review_example in category_data['reviews'][:3]:  # Show top 3 examples
+                        st.markdown(f"• {review_example}")
+                    
+                    if len(category_data['reviews']) > 3:
+                        st.caption(f"...and {len(category_data['reviews']) - 3} more similar reviews")
+        
+        if not issue_found:
+            st.success("✅ No significant complaint categories identified!")
+    
+    with tab2:
+        # Positive categories
+        positive_categories = ['positive_highlights', 'ease_of_use', 'customer_service']
+        
+        positive_found = False
+        for category_key in positive_categories:
+            if category_key in categories and categories[category_key]['count'] > 0:
+                positive_found = True
+                category_data = categories[category_key]
+                
+                # Format category name
+                category_name = category_key.replace('_', ' ').title()
+                
+                with st.expander(f"🟢 {category_name} ({category_data['count']} reviews)", expanded=True):
+                    st.markdown(f"**Most Common Trend:** {category_data['trend']}")
+                    
+                    st.markdown("**Example Reviews:**")
+                    for review_example in category_data['reviews'][:3]:  # Show top 3 examples
+                        st.markdown(f"• {review_example}")
+                    
+                    if len(category_data['reviews']) > 3:
+                        st.caption(f"...and {len(category_data['reviews']) - 3} more similar reviews")
+        
+        if not positive_found:
+            st.info("ℹ️ No specific positive highlight categories identified")
+    
+    # Summary stats
+    total_categorized = sum(cat['count'] for cat in categories.values())
+    st.markdown(f"**Total Categorized Reviews:** {total_categorized}")
+    
+    # Top issues summary
+    sorted_categories = sorted(categories.items(), key=lambda x: x[1]['count'], reverse=True)
+    top_3_issues = sorted_categories[:3]
+    
+    if top_3_issues:
+        st.markdown("**Top 3 Most Common Issues:**")
+        for i, (category_key, category_data) in enumerate(top_3_issues, 1):
+            category_name = category_key.replace('_', ' ').title()
+            st.markdown(f"{i}. **{category_name}**: {category_data['count']} reviews - {category_data['trend']}"))
 
 def display_basic_results(results):
     """Display basic analysis results"""
