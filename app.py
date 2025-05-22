@@ -13,8 +13,9 @@ import json
 import logging
 import traceback
 import io
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from typing import Dict, List, Any, Optional
+import re
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -58,12 +59,110 @@ def initialize_session_state():
         'show_chat': False,
         'current_listing_title': '',
         'current_listing_description': '',
-        'chat_session': None
+        'chat_session': None,
+        'selected_date_range': None,
+        'filtered_data': None,
+        'rating_trends': None
     }
     
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+
+def parse_amazon_date(date_string):
+    """Parse Amazon review date format: 'Reviewed in the United States on May 19, 2025'"""
+    try:
+        if pd.isna(date_string) or not date_string:
+            return None
+            
+        # Extract date part after "on "
+        if "on " in str(date_string):
+            date_part = str(date_string).split("on ")[-1]
+        else:
+            date_part = str(date_string)
+        
+        # Try multiple date formats
+        date_formats = [
+            '%B %d, %Y',      # May 19, 2025
+            '%b %d, %Y',      # May 19, 2025
+            '%m/%d/%Y',       # 5/19/2025
+            '%Y-%m-%d',       # 2025-05-19
+            '%d/%m/%Y'        # 19/5/2025
+        ]
+        
+        for fmt in date_formats:
+            try:
+                return datetime.strptime(date_part.strip(), fmt).date()
+            except ValueError:
+                continue
+        
+        # If all formats fail, try pandas date parser
+        return pd.to_datetime(date_part, errors='coerce').date()
+        
+    except Exception as e:
+        logger.warning(f"Could not parse date '{date_string}': {str(e)}")
+        return None
+
+def calculate_rating_trends(reviews_df):
+    """Calculate rating trends over time"""
+    try:
+        # Parse dates
+        reviews_df['parsed_date'] = reviews_df['Date'].apply(parse_amazon_date)
+        
+        # Filter out rows with unparseable dates
+        valid_reviews = reviews_df[reviews_df['parsed_date'].notna()].copy()
+        
+        if len(valid_reviews) == 0:
+            return {
+                'success': False,
+                'error': 'No valid dates found in reviews'
+            }
+        
+        # Sort by date
+        valid_reviews = valid_reviews.sort_values('parsed_date')
+        
+        # Calculate monthly averages
+        valid_reviews['year_month'] = valid_reviews['parsed_date'].apply(lambda x: x.strftime('%Y-%m'))
+        monthly_ratings = valid_reviews.groupby('year_month').agg({
+            'Rating': ['mean', 'count'],
+            'parsed_date': 'first'
+        }).reset_index()
+        
+        monthly_ratings.columns = ['year_month', 'avg_rating', 'review_count', 'date']
+        monthly_ratings['avg_rating'] = monthly_ratings['avg_rating'].round(2)
+        
+        # Calculate overall trend
+        if len(monthly_ratings) >= 2:
+            first_month = monthly_ratings.iloc[0]['avg_rating']
+            last_month = monthly_ratings.iloc[-1]['avg_rating']
+            trend_direction = 'improving' if last_month > first_month else 'declining' if last_month < first_month else 'stable'
+            trend_magnitude = abs(last_month - first_month)
+        else:
+            trend_direction = 'insufficient_data'
+            trend_magnitude = 0
+        
+        return {
+            'success': True,
+            'monthly_data': monthly_ratings,
+            'date_range': {
+                'earliest': valid_reviews['parsed_date'].min(),
+                'latest': valid_reviews['parsed_date'].max()
+            },
+            'trend_analysis': {
+                'direction': trend_direction,
+                'magnitude': round(trend_magnitude, 2),
+                'current_avg': monthly_ratings.iloc[-1]['avg_rating'] if len(monthly_ratings) > 0 else 0,
+                'total_months': len(monthly_ratings)
+            },
+            'total_valid_reviews': len(valid_reviews)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error calculating rating trends: {str(e)}")
+        return {
+            'success': False,
+            'error': str(e)
+        }
 
 def check_ai_status():
     """Check AI availability and initialize analyzer"""
@@ -359,8 +458,11 @@ def load_example_reviews():
         st.error(f"❌ Error loading example data: {str(e)}")
 
 def prepare_review_data(df):
-    """Prepare and clean review data"""
+    """Prepare and clean review data with enhanced date parsing"""
     try:
+        # Parse dates first
+        df['parsed_date'] = df['Date'].apply(parse_amazon_date)
+        
         # Extract product info
         product_info = {
             'asin': df['Variation'].iloc[0] if 'Variation' in df.columns else 'Unknown',
@@ -378,17 +480,23 @@ def prepare_review_data(df):
                     'body': row.get('Body', ''),
                     'rating': row.get('Rating', 3),
                     'date': row.get('Date', ''),
+                    'parsed_date': row.get('parsed_date'),
                     'author': row.get('Author', ''),
                     'verified': row.get('Verified', '') == 'yes'
                 }
                 reviews.append(review)
+        
+        # Calculate rating trends
+        trends = calculate_rating_trends(df)
         
         return {
             'success': True,
             'product_info': product_info,
             'reviews': reviews,
             'total_reviews': len(reviews),
-            'raw_data': df
+            'raw_data': df,
+            'rating_trends': trends,
+            'date_range': trends.get('date_range') if trends.get('success') else None
         }
         
     except Exception as e:
@@ -398,7 +506,7 @@ def prepare_review_data(df):
         }
 
 def display_data_summary():
-    """Display summary of uploaded data"""
+    """Display summary of uploaded data with date filtering"""
     if not st.session_state.uploaded_data:
         return
     
@@ -411,27 +519,188 @@ def display_data_summary():
     # Show AI chat option
     display_ai_chat()
     
+    # Date filtering section
+    if data.get('date_range'):
+        display_date_filtering(data)
+    
+    # Use filtered data if available, otherwise use all data
+    current_reviews = st.session_state.filtered_data if st.session_state.filtered_data else reviews
+    current_data_label = "Filtered" if st.session_state.filtered_data else "All"
+    
     # Metrics
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.metric("Total Reviews", data['total_reviews'])
+        st.metric(f"{current_data_label} Reviews", len(current_reviews))
     
     with col2:
-        ratings = [r['rating'] for r in reviews if r['rating']]
+        ratings = [r['rating'] for r in current_reviews if r['rating']]
         avg_rating = sum(ratings) / len(ratings) if ratings else 0
         st.metric("Average Rating", f"{avg_rating:.1f}/5")
     
     with col3:
-        verified_count = sum(1 for r in reviews if r.get('verified'))
+        verified_count = sum(1 for r in current_reviews if r.get('verified'))
         st.metric("Verified Reviews", verified_count)
     
     with col4:
         st.metric("Product ASIN", product_info['asin'])
     
+    # Rating trends
+    if data.get('rating_trends') and data['rating_trends'].get('success'):
+        display_rating_trends(data['rating_trends'])
+    
     # Rating distribution
     if ratings:
-        st.markdown("### Rating Distribution")
+        display_rating_distribution(current_reviews, current_data_label)
+    
+    # Analysis button
+    if st.button("🤖 Run AI Analysis", type="primary", use_container_width=True):
+        run_ai_analysis()
+
+def display_date_filtering(data):
+    """Display date filtering controls"""
+    date_range = data['date_range']
+    
+    with st.expander("📅 Filter by Date Range", expanded=False):
+        st.markdown("**Select date range to analyze specific time periods**")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            start_date = st.date_input(
+                "Start Date",
+                value=date_range['earliest'],
+                min_value=date_range['earliest'],
+                max_value=date_range['latest']
+            )
+        
+        with col2:
+            end_date = st.date_input(
+                "End Date", 
+                value=date_range['latest'],
+                min_value=date_range['earliest'],
+                max_value=date_range['latest']
+            )
+        
+        if st.button("🔍 Apply Date Filter"):
+            # Filter reviews by date range
+            filtered_reviews = []
+            for review in data['reviews']:
+                if review.get('parsed_date'):
+                    if start_date <= review['parsed_date'] <= end_date:
+                        filtered_reviews.append(review)
+            
+            st.session_state.filtered_data = filtered_reviews
+            st.session_state.selected_date_range = {
+                'start': start_date,
+                'end': end_date
+            }
+            st.success(f"✅ Filtered to {len(filtered_reviews)} reviews from {start_date} to {end_date}")
+            st.rerun()
+        
+        if st.session_state.filtered_data:
+            if st.button("🔄 Clear Filter"):
+                st.session_state.filtered_data = None
+                st.session_state.selected_date_range = None
+                st.rerun()
+
+def display_rating_trends(trends_data):
+    """Display rating trends analysis"""
+    with st.expander("📈 Rating Trends Over Time", expanded=True):
+        if not trends_data.get('success'):
+            st.error(f"❌ Could not calculate trends: {trends_data.get('error')}")
+            return
+        
+        monthly_data = trends_data['monthly_data']
+        trend_analysis = trends_data['trend_analysis']
+        
+        # Trend summary
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            direction = trend_analysis['direction']
+            direction_emoji = {
+                'improving': '📈',
+                'declining': '📉', 
+                'stable': '➡️',
+                'insufficient_data': '❓'
+            }
+            st.metric("Trend Direction", f"{direction_emoji.get(direction, '❓')} {direction.title()}")
+        
+        with col2:
+            st.metric("Change Magnitude", f"{trend_analysis['magnitude']:.2f} stars")
+        
+        with col3:
+            st.metric("Current Average", f"{trend_analysis['current_avg']:.1f}/5")
+        
+        with col4:
+            st.metric("Months of Data", trend_analysis['total_months'])
+        
+        # Monthly data table
+        if len(monthly_data) > 0:
+            st.markdown("**Monthly Rating Breakdown:**")
+            
+            # Format for display
+            display_data = monthly_data.copy()
+            display_data['Month'] = display_data['date'].dt.strftime('%B %Y')
+            display_data['Average Rating'] = display_data['avg_rating']
+            display_data['Review Count'] = display_data['review_count']
+            
+            st.dataframe(
+                display_data[['Month', 'Average Rating', 'Review Count']], 
+                use_container_width=True
+            )
+            
+            # Time period comparison
+            if len(monthly_data) >= 2:
+                display_time_period_comparison(monthly_data)
+
+def display_time_period_comparison(monthly_data):
+    """Display comparison between time periods"""
+    st.markdown("**📊 Time Period Comparison**")
+    
+    # Split data into first half and second half
+    mid_point = len(monthly_data) // 2
+    first_half = monthly_data.iloc[:mid_point]
+    second_half = monthly_data.iloc[mid_point:]
+    
+    if len(first_half) > 0 and len(second_half) > 0:
+        first_avg = first_half['avg_rating'].mean()
+        second_avg = second_half['avg_rating'].mean()
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("Earlier Period Avg", f"{first_avg:.2f}/5")
+        
+        with col2:
+            st.metric("Recent Period Avg", f"{second_avg:.2f}/5")
+        
+        with col3:
+            change = second_avg - first_avg
+            change_direction = "📈" if change > 0 else "📉" if change < 0 else "➡️"
+            st.metric("Change", f"{change_direction} {abs(change):.2f}")
+        
+        # Interpretation
+        if abs(change) >= 0.3:
+            if change > 0:
+                st.success(f"🎉 **Significant Improvement**: Ratings increased by {change:.2f} stars over time")
+            else:
+                st.error(f"⚠️ **Declining Trend**: Ratings decreased by {abs(change):.2f} stars over time")
+        elif abs(change) >= 0.1:
+            if change > 0:
+                st.info(f"📈 **Slight Improvement**: Ratings increased by {change:.2f} stars")
+            else:
+                st.warning(f"📉 **Slight Decline**: Ratings decreased by {abs(change):.2f} stars")
+        else:
+            st.info("➡️ **Stable Performance**: No significant change in ratings over time")
+
+def display_rating_distribution(reviews, data_label):
+    """Display rating distribution"""
+    st.markdown(f"### {data_label} Rating Distribution")
+    ratings = [r['rating'] for r in reviews if r['rating']]
+    
+    if ratings:
         rating_counts = {}
         for rating in ratings:
             rating_counts[rating] = rating_counts.get(rating, 0) + 1
@@ -442,13 +711,9 @@ def display_data_summary():
         ])
         
         st.dataframe(rating_df, use_container_width=True)
-    
-    # Analysis button
-    if st.button("🤖 Run AI Analysis", type="primary", use_container_width=True):
-        run_ai_analysis()
 
 def run_ai_analysis():
-    """Run AI analysis on uploaded data"""
+    """Run AI analysis on uploaded data with date filtering support"""
     if not st.session_state.uploaded_data:
         st.error("No data to analyze")
         return
@@ -465,13 +730,18 @@ def run_ai_analysis():
     try:
         st.session_state.processing = True
         
-        with st.spinner("🤖 Running AI analysis... This may take a moment."):
+        # Use filtered data if available
+        reviews_to_analyze = st.session_state.filtered_data if st.session_state.filtered_data else st.session_state.uploaded_data['reviews']
+        data_context = "filtered" if st.session_state.filtered_data else "all"
+        
+        with st.spinner(f"🤖 Running AI analysis on {len(reviews_to_analyze)} {data_context} reviews..."):
             data = st.session_state.uploaded_data
             
             # Create comprehensive listing optimization analysis
             result = analyze_for_listing_optimization(
                 data['product_info'], 
-                data['reviews']
+                reviews_to_analyze,
+                data_context
             )
             
             if result.get('success'):
@@ -492,11 +762,18 @@ def run_ai_analysis():
     finally:
         st.session_state.processing = False
 
-def analyze_for_listing_optimization(product_info, reviews):
+def analyze_for_listing_optimization(product_info, reviews, data_context="all"):
     """Run comprehensive AI analysis focused on listing optimization - ALL REVIEWS"""
     try:
         # Process ALL reviews, not just a subset
-        st.info(f"🔍 Analyzing ALL {len(reviews)} reviews for comprehensive insights...")
+        review_count_text = f"ALL {len(reviews)}" if data_context == "all" else f"{len(reviews)} filtered"
+        st.info(f"🔍 Analyzing {review_count_text} reviews for comprehensive insights...")
+        
+        # Include date context if filtered
+        date_context = ""
+        if data_context == "filtered" and st.session_state.selected_date_range:
+            date_range = st.session_state.selected_date_range
+            date_context = f"\n\nDATE FILTER APPLIED: Analyzing reviews from {date_range['start']} to {date_range['end']}"
         
         # Prepare ALL reviews for analysis
         all_review_data = []
@@ -508,7 +785,8 @@ def analyze_for_listing_optimization(product_info, reviews):
                 'body': review.get('body', ''),
                 'verified': review.get('verified', False),
                 'date': review.get('date', ''),
-                'author': review.get('author', '')
+                'author': review.get('author', ''),
+                'parsed_date': review.get('parsed_date')
             }
             all_review_data.append(review_data)
         
@@ -522,7 +800,7 @@ def analyze_for_listing_optimization(product_info, reviews):
                 listing_context += f"Current Description: {st.session_state.current_listing_description}\n"
         
         # Run categorization analysis
-        categorization_result = categorize_all_reviews(all_review_data, product_info, listing_context)
+        categorization_result = categorize_all_reviews(all_review_data, product_info, listing_context + date_context)
         
         # Run comprehensive analysis using your existing analyzer
         comprehensive_result = st.session_state.ai_analyzer.analyze_reviews_comprehensive(
@@ -537,7 +815,9 @@ def analyze_for_listing_optimization(product_info, reviews):
                 'review_categories': categorization_result['categories'],
                 'reviews_analyzed': len(reviews),
                 'timestamp': datetime.now().isoformat(),
-                'has_listing_context': bool(listing_context)
+                'has_listing_context': bool(listing_context),
+                'data_context': data_context,
+                'date_filter': st.session_state.selected_date_range if data_context == "filtered" else None
             }
         else:
             return {
@@ -755,7 +1035,9 @@ def display_comprehensive_ai_results(results):
         st.metric("Reviews Analyzed", results.get('reviews_analyzed', 0))
     
     with col2:
-        st.metric("AI Analysis", "✅ Complete")
+        data_context = results.get('data_context', 'all')
+        context_label = "📅 Filtered Data" if data_context == "filtered" else "📊 All Data"
+        st.metric("Analysis Scope", context_label)
     
     with col3:
         sentiment = ai_analysis.get('overall_sentiment', 'Unknown')
@@ -766,6 +1048,11 @@ def display_comprehensive_ai_results(results):
             st.metric("Listing Context", "✅ Included")
         else:
             st.metric("Listing Context", "❌ Not Provided")
+    
+    # Show date filter info if applied
+    if results.get('date_filter'):
+        date_filter = results['date_filter']
+        st.info(f"📅 **Date Filter Applied**: Analyzing reviews from {date_filter['start']} to {date_filter['end']}")
     
     # Review Categories Section - NEW!
     if results.get('review_categories'):
