@@ -1506,14 +1506,7 @@ class ProfessionalDashboard:
     def initialize_app(self):
         """Initialize the Streamlit app with professional styling"""
         try:
-            st.set_page_config(
-                page_title="Amazon Medical Device Optimizer",
-                page_icon="🏥",
-                layout="wide",
-                initial_sidebar_state="expanded"
-            )
-            
-            # Apply professional theme
+            # Apply professional theme (page config handled in main app)
             self.ui.set_professional_theme()
             
         except Exception as e:
