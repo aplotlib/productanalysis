@@ -597,17 +597,24 @@ class DashboardRenderer:
             api_available = st.session_state.api_status.get('available', False)
             if api_available:
                 st.success("✅ AI Analysis Available")
+                st.caption("GPT-4o Vision for images & PDFs")
             else:
                 st.error("❌ AI Analysis Unavailable")
                 st.caption("Configure OpenAI API key for AI analysis")
             
             # OCR availability  
             ocr_available = st.session_state.module_status.get('pytesseract', False)
-            ocr_status = "✅ Available" if ocr_available else "⚠️ Limited (Cloud)"
-            st.markdown(f"**OCR Processing:** {ocr_status}")
+            pdf_available = st.session_state.module_status.get('pdf2image', False)
             
-            if not ocr_available:
-                st.caption("OCR disabled for cloud deployment. AI Vision will be used instead.")
+            if ocr_available and pdf_available:
+                st.markdown("**OCR Processing:** ✅ Full Support")
+                st.caption("OCR + PDF processing available")
+            elif ocr_available:
+                st.markdown("**OCR Processing:** ⚠️ Images Only")
+                st.caption("OCR for images, AI Vision for PDFs")
+            else:
+                st.markdown("**OCR Processing:** ⚠️ AI Vision Only")
+                st.caption("Using AI Vision for all file types")
             
             st.markdown("### Supported Content")
             st.markdown("""
@@ -617,16 +624,29 @@ class DashboardRenderer:
             - Product listings, reviews
             
             **Documents:** 
-            - PDF files
+            - PDF files (via AI Vision)
             - Multi-page documents
             - Reports, presentations
             
             **Auto-Detection:**
             - ASINs (B0XXXXXXXXX)
-            - Product prices
-            - Star ratings
-            - Review counts
+            - Product prices & ratings
+            - Review counts & sentiment
+            - Return reason categories
             """)
+            
+            # Processing method explanation
+            if not api_available:
+                st.warning("⚠️ Limited functionality without API key")
+            elif not ocr_available:
+                st.info("ℹ️ Cloud deployment: Using AI Vision for all processing")
+            
+            st.markdown("### Recent Processing")
+            if hasattr(st.session_state, 'image_analysis_results') and st.session_state.image_analysis_results:
+                recent_count = len(st.session_state.image_analysis_results)
+                st.metric("Sessions", recent_count)
+            else:
+                st.metric("Sessions", 0)
         
         # Display recent analysis results
         if hasattr(st.session_state, 'image_analysis_results') and st.session_state.image_analysis_results:
