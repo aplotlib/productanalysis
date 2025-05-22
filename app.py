@@ -828,16 +828,8 @@ class ApplicationController:
                     st.rerun()
                 return
             
-            # Initialize dashboard if available
-            if self.dashboard:
-                try:
-                    self.dashboard.initialize_app()
-                except Exception as e:
-                    logger.error(f"Dashboard initialization error: {str(e)}")
-                    st.error("Dashboard initialization failed. Using minimal interface.")
-                    self._render_minimal_interface()
-                    return
-            else:
+            # Dashboard available - proceed with rendering
+            if not self.dashboard:
                 self._render_minimal_interface()
                 return
             
