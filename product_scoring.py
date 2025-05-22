@@ -99,14 +99,14 @@ class ProductMetrics:
     name: str
     category: str
     
-    # Sales metrics
+    # Sales metrics (required fields first)
     sales_30d: int
-    sales_365d: Optional[int] = None
-    sales_velocity: Optional[float] = None  # Sales per day
-    
-    # Return metrics  
     returns_30d: int
+    
+    # Optional fields with defaults
+    sales_365d: Optional[int] = None
     returns_365d: Optional[int] = None
+    sales_velocity: Optional[float] = None  # Sales per day
     return_rate_30d: float = 0.0
     return_rate_365d: Optional[float] = None
     
