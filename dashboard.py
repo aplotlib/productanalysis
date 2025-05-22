@@ -773,26 +773,318 @@ class DashboardRenderer:
                         for driver in component_score.key_drivers:
                             st.markdown(f"• {driver}")
     
-    def render_ai_insights_dashboard(self, ai_results: Dict[str, Any]):
-        """Render AI analysis insights dashboard"""
+    def render_ai_chat_tab(self):
+        """Render AI chat tab with embedded chat interface"""
+        try:
+            from ai_chat import AIChatInterface
+            chat_interface = AIChatInterface()
+            chat_interface.render_chat_interface()
+        except ImportError:
+            st.error("AI Chat module not available. Please ensure ai_chat.py is in your project directory.")
+            st.info("The AI Chat feature provides standalone consulting without requiring data uploads.")
+    
+    def render_ai_analysis_dashboard(self, ai_results: Dict[str, Any]):
+        """Render enhanced AI analysis dashboard with manual triggers"""
         
-        st.markdown("## 🧠 AI Analysis Insights")
+        st.markdown("## 🧠 AI Product Analysis")
+        st.markdown("Run AI analysis on your uploaded products to get detailed optimization recommendations.")
         
-        if not ai_results:
-            self.ui.show_alert("No AI analysis results available. Run AI analysis on your products first.", "info")
+        # Check if we have data to analyze
+        if not hasattr(st.session_state, 'processed_data') or not st.session_state.get('data_processed', False):
+            st.warning("⚠️ No processed data available for AI analysis.")
+            st.info("Please upload and process product data in the Data Import tab first.")
             return
         
-        # AI insights tabs
-        ai_tabs = st.tabs(["📝 Review Analysis", "↩️ Return Analysis", "🎯 Listing Optimization"])
+        processed_data = st.session_state.processed_data
+        products = processed_data.get('products', [])
+        reviews_data = processed_data.get('reviews', {})
+        returns_data = processed_data.get('returns', {})
         
-        with ai_tabs[0]:
-            self._render_review_insights(ai_results.get('review_analysis'))
+        if not products:
+            st.warning("No products found in processed data.")
+            return
         
-        with ai_tabs[1]:
-            self._render_return_insights(ai_results.get('return_analysis'))
+        # AI Analysis Control Panel
+        with st.container():
+            st.markdown("### 🎛️ AI Analysis Control Panel")
+            
+            col1, col2, col3 = st.columns([2, 1, 1])
+            
+            with col1:
+                # Product selector for individual analysis
+                product_options = [(p['asin'], f"{p['name']} ({p['asin']})") for p in products]
+                selected_asin = st.selectbox(
+                    "Select product for AI analysis:",
+                    options=[asin for asin, _ in product_options],
+                    format_func=lambda asin: next(name for a, name in product_options if a == asin),
+                    help="Choose a product to run detailed AI analysis"
+                )
+            
+            with col2:
+                # Individual product analysis
+                if st.button("🔍 Analyze Selected Product", type="primary", use_container_width=True):
+                    if 'run_individual_ai_analysis' not in st.session_state:
+                        st.session_state['run_individual_ai_analysis'] = selected_asin
+                        st.rerun()
+            
+            with col3:
+                # Bulk analysis for all products
+                if st.button("🚀 Analyze All Products", type="secondary", use_container_width=True):
+                    if 'run_bulk_ai_analysis' not in st.session_state:
+                        st.session_state['run_bulk_ai_analysis'] = True
+                        st.rerun()
         
-        with ai_tabs[2]:
-            self._render_optimization_insights(ai_results.get('listing_optimization'))
+        # Analysis status and progress
+        if hasattr(st.session_state, 'ai_analysis_in_progress'):
+            if st.session_state.ai_analysis_in_progress:
+                st.info("🔄 AI analysis in progress... Please wait.")
+                return
+        
+        # Display analysis controls and summaries
+        analysis_tabs = st.tabs(["📊 Analysis Summary", "📝 Review Insights", "↩️ Return Analysis", "🎯 Recommendations"])
+        
+        with analysis_tabs[0]:
+            self._render_ai_analysis_summary(products, ai_results)
+        
+        with analysis_tabs[1]:
+            self._render_ai_review_insights(ai_results)
+        
+        with analysis_tabs[2]:
+            self._render_ai_return_insights(ai_results)
+        
+        with analysis_tabs[3]:
+            self._render_ai_recommendations(ai_results)
+    
+    def _render_ai_analysis_summary(self, products: List[Dict], ai_results: Dict[str, Any]):
+        """Render AI analysis summary"""
+        
+        st.markdown("### AI Analysis Overview")
+        
+        # Analysis statistics
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            total_products = len(products)
+            st.metric("Total Products", total_products)
+        
+        with col2:
+            analyzed_products = len(ai_results)
+            st.metric("AI Analyzed", analyzed_products)
+        
+        with col3:
+            if analyzed_products > 0:
+                completion_rate = (analyzed_products / total_products) * 100
+                st.metric("Completion Rate", f"{completion_rate:.0f}%")
+            else:
+                st.metric("Completion Rate", "0%")
+        
+        with col4:
+            # Estimate API usage
+            if hasattr(st.session_state, 'ai_api_calls'):
+                st.metric("API Calls Made", st.session_state.ai_api_calls)
+        
+        # Analysis results overview
+        if ai_results:
+            st.markdown("### Products with AI Analysis")
+            
+            analysis_data = []
+            for asin, analysis in ai_results.items():
+                product = next((p for p in products if p['asin'] == asin), {})
+                
+                analysis_data.append({
+                    'ASIN': asin,
+                    'Product': product.get('name', 'Unknown'),
+                    'Review Analysis': '✅' if 'review_analysis' in analysis else '❌',
+                    'Return Analysis': '✅' if 'return_analysis' in analysis else '❌',
+                    'Listing Optimization': '✅' if 'listing_optimization' in analysis else '❌',
+                    'Confidence': f"{analysis.get('review_analysis', {}).get('confidence_score', 0):.0%}" if 'review_analysis' in analysis else 'N/A'
+                })
+            
+            df = pd.DataFrame(analysis_data)
+            st.dataframe(df, use_container_width=True)
+        else:
+            st.info("No AI analysis results yet. Click 'Analyze Selected Product' or 'Analyze All Products' to begin.")
+    
+    def _render_ai_review_insights(self, ai_results: Dict[str, Any]):
+        """Render AI review analysis results"""
+        
+        if not ai_results:
+            st.info("No AI review analysis available. Run AI analysis first.")
+            return
+        
+        st.markdown("### 📝 Customer Review Analysis")
+        
+        # Product selector for detailed view
+        analyzed_products = list(ai_results.keys())
+        if not analyzed_products:
+            st.info("No products have been analyzed yet.")
+            return
+        
+        selected_product = st.selectbox(
+            "View detailed review analysis for:",
+            options=analyzed_products,
+            format_func=lambda asin: f"{asin} - {next((p.get('name', 'Unknown') for p in st.session_state.processed_data.get('products', []) if p['asin'] == asin), 'Unknown')}"
+        )
+        
+        if selected_product and 'review_analysis' in ai_results[selected_product]:
+            review_analysis = ai_results[selected_product]['review_analysis']
+            
+            if review_analysis.success:
+                # Display analysis results
+                col1, col2 = st.columns([2, 1])
+                
+                with col1:
+                    st.markdown("#### Key Findings")
+                    if review_analysis.detailed_findings:
+                        for category, finding in review_analysis.detailed_findings.items():
+                            if finding:
+                                with st.expander(f"{category.replace('_', ' ').title()}"):
+                                    st.markdown(finding)
+                
+                with col2:
+                    st.markdown("#### Analysis Metrics")
+                    st.metric("Confidence Score", f"{review_analysis.confidence_score:.0%}")
+                    
+                    data_quality = review_analysis.data_quality
+                    st.metric("Data Quality", data_quality.get('quality', 'Unknown').title())
+                    st.metric("Reviews Analyzed", data_quality.get('total', 0))
+                
+                # Recommendations
+                if review_analysis.recommendations:
+                    st.markdown("#### AI Recommendations")
+                    for i, rec in enumerate(review_analysis.recommendations[:5], 1):
+                        priority_color = COLORS['accent'] if rec.get('priority') == 'High' else COLORS['warning']
+                        st.markdown(f"""
+                        <div style="border-left: 4px solid {priority_color}; padding: 10px; margin: 10px 0; background-color: rgba(255,255,255,0.1);">
+                            <strong>{i}. {rec.get('category', 'General')}</strong><br>
+                            {rec.get('action', 'No action specified')}<br>
+                            <small><em>Expected Impact: {rec.get('expected_impact', 'Not specified')}</em></small>
+                        </div>
+                        """, unsafe_allow_html=True)
+            else:
+                st.error(f"Review analysis failed: {', '.join(review_analysis.errors or ['Unknown error'])}")
+        else:
+            st.info("No review analysis available for this product.")
+    
+    def _render_ai_return_insights(self, ai_results: Dict[str, Any]):
+        """Render AI return analysis results"""
+        
+        if not ai_results:
+            st.info("No AI return analysis available. Run AI analysis first.")
+            return
+        
+        st.markdown("### ↩️ Return Reason Analysis")
+        
+        # Similar structure to review insights but for returns
+        analyzed_products = [asin for asin, analysis in ai_results.items() if 'return_analysis' in analysis]
+        
+        if not analyzed_products:
+            st.info("No products have return analysis yet. Products need return data to generate insights.")
+            return
+        
+        selected_product = st.selectbox(
+            "View return analysis for:",
+            options=analyzed_products,
+            format_func=lambda asin: f"{asin} - {next((p.get('name', 'Unknown') for p in st.session_state.processed_data.get('products', []) if p['asin'] == asin), 'Unknown')}",
+            key="return_analysis_selector"
+        )
+        
+        if selected_product:
+            return_analysis = ai_results[selected_product]['return_analysis']
+            
+            if return_analysis.success:
+                col1, col2 = st.columns([2, 1])
+                
+                with col1:
+                    st.markdown("#### Return Categories & Insights")
+                    if return_analysis.detailed_findings:
+                        for category, finding in return_analysis.detailed_findings.items():
+                            if finding:
+                                with st.expander(f"{category.replace('_', ' ').title()}"):
+                                    st.markdown(finding)
+                
+                with col2:
+                    st.markdown("#### Return Metrics")
+                    st.metric("Analysis Confidence", f"{return_analysis.confidence_score:.0%}")
+                    
+                    data_quality = return_analysis.data_quality
+                    st.metric("Returns Analyzed", data_quality.get('total', 0))
+                    st.metric("Data Quality", data_quality.get('quality', 'Unknown').title())
+            else:
+                st.error(f"Return analysis failed: {', '.join(return_analysis.errors or ['Unknown error'])}")
+    
+    def _render_ai_recommendations(self, ai_results: Dict[str, Any]):
+        """Render consolidated AI recommendations"""
+        
+        if not ai_results:
+            st.info("No AI recommendations available. Run AI analysis first.")
+            return
+        
+        st.markdown("### 🎯 Consolidated AI Recommendations")
+        
+        # Compile all recommendations
+        all_recommendations = []
+        
+        for asin, analysis in ai_results.items():
+            product_name = next((p.get('name', 'Unknown') for p in st.session_state.processed_data.get('products', []) if p['asin'] == asin), 'Unknown')
+            
+            # Collect recommendations from all analysis types
+            for analysis_type in ['review_analysis', 'return_analysis', 'listing_optimization']:
+                if analysis_type in analysis and hasattr(analysis[analysis_type], 'recommendations'):
+                    for rec in analysis[analysis_type].recommendations:
+                        all_recommendations.append({
+                            'asin': asin,
+                            'product_name': product_name,
+                            'analysis_type': analysis_type.replace('_', ' ').title(),
+                            'category': rec.get('category', 'General'),
+                            'action': rec.get('action', 'No action specified'),
+                            'priority': rec.get('priority', 'Medium'),
+                            'expected_impact': rec.get('expected_impact', 'Not specified')
+                        })
+        
+        if all_recommendations:
+            # Group by priority
+            high_priority = [r for r in all_recommendations if r['priority'] == 'High']
+            medium_priority = [r for r in all_recommendations if r['priority'] == 'Medium']
+            low_priority = [r for r in all_recommendations if r['priority'] == 'Low']
+            
+            # Display by priority
+            if high_priority:
+                st.markdown("#### 🔴 High Priority Actions")
+                for rec in high_priority:
+                    st.markdown(f"""
+                    **{rec['product_name']} ({rec['asin']})**  
+                    *{rec['analysis_type']} - {rec['category']}*  
+                    {rec['action']}  
+                    *Expected Impact: {rec['expected_impact']}*
+                    """)
+                    st.markdown("---")
+            
+            if medium_priority:
+                with st.expander(f"🟡 Medium Priority Actions ({len(medium_priority)} items)"):
+                    for rec in medium_priority:
+                        st.markdown(f"""
+                        **{rec['product_name']}** - {rec['action']}  
+                        *{rec['expected_impact']}*
+                        """)
+            
+            if low_priority:
+                with st.expander(f"🟢 Low Priority Actions ({len(low_priority)} items)"):
+                    for rec in low_priority:
+                        st.markdown(f"**{rec['product_name']}** - {rec['action']}")
+            
+            # Export recommendations
+            rec_df = pd.DataFrame(all_recommendations)
+            csv_data = rec_df.to_csv(index=False)
+            
+            st.download_button(
+                label="📥 Download All Recommendations (CSV)",
+                data=csv_data,
+                file_name=f"ai_recommendations_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                mime="text/csv"
+            )
+        else:
+            st.info("No AI recommendations generated yet. Run AI analysis on products with review or return data.")
     
     def _render_review_insights(self, review_analysis: Optional[Any]):
         """Render review analysis insights"""
@@ -1319,7 +1611,8 @@ class ProfessionalDashboard:
         main_tabs = st.tabs([
             "📁 Data Import", 
             "📊 Performance Scores", 
-            "🧠 AI Insights", 
+            "🤖 AI Chat",
+            "🧠 AI Analysis", 
             "📋 Export & Reports"
         ])
         
@@ -1330,9 +1623,12 @@ class ProfessionalDashboard:
             self.renderer.render_scoring_dashboard(st.session_state.scored_products)
         
         with main_tabs[2]:
-            self.renderer.render_ai_insights_dashboard(st.session_state.ai_analysis_results)
+            self.renderer.render_ai_chat_tab()
         
         with main_tabs[3]:
+            self.renderer.render_ai_analysis_dashboard(st.session_state.ai_analysis_results)
+        
+        with main_tabs[4]:
             self.renderer.render_export_dashboard(
                 st.session_state.scored_products,
                 st.session_state.ai_analysis_results
