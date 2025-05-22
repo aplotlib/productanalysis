@@ -1,27 +1,51 @@
-# Core Streamlit app
-streamlit>=1.15.0
+# Amazon Medical Device Listing Optimizer - Requirements
+# Version: 2.0
+# Production Ready: Yes
 
-# Data & analysis
+# Core web framework
+streamlit>=1.28.0
+
+# Data processing and analysis
 pandas>=2.0.0
 numpy>=1.24.0
-plotly>=5.14.0
 
-# Imaging & OCR
-Pillow>=9.0.0
+# Data visualization
+plotly>=5.15.0
+
+# AI and API integration
+openai>=1.0.0
+requests>=2.31.0
+
+# Excel file processing
+openpyxl>=3.1.0
+xlsxwriter>=3.1.0
+
+# Image processing and OCR
+Pillow>=10.0.0
 pytesseract>=0.3.10
-pdf2image>=1.16.0
+pdf2image>=3.1.0
 
-# HTTP & APIs
-requests>=2.28.0
+# Utility libraries
+python-dateutil>=2.8.2
+typing-extensions>=4.7.0
 
-# Excel export
-XlsxWriter>=3.0.0
+# Optional: Enhanced data processing
+scipy>=1.11.0
+scikit-learn>=1.3.0
 
-# Rich (used by Streamlit) – pin to avoid dependency churn
-rich>=14.0.0,<15.0.0
-markdown-it-py>=3.0.0,<4.0.0
-mdurl>=0.1.2,<0.2.0
-pygments>=2.13.0,<3.0.0
+# Development and debugging (optional)
+# pytest>=7.4.0
+# black>=23.7.0
+# flake8>=6.0.0
 
-# Async support (if you ever use asyncio HTTP clients)
-aiohttp>=3.8.1
+# System requirements notes:
+# For OCR functionality, you'll also need to install:
+# - Tesseract OCR engine: https://github.com/tesseract-ocr/tesseract
+# - On Windows: Download installer from GitHub releases
+# - On Mac: brew install tesseract
+# - On Linux: sudo apt-get install tesseract-ocr
+#
+# For PDF processing, you may need:
+# - poppler-utils (Linux: sudo apt-get install poppler-utils)
+# - On Mac: brew install poppler
+# - On Windows: Download from http://blog.alivate.com.au/poppler-windows/
