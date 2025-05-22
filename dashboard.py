@@ -526,7 +526,8 @@ class DashboardRenderer:
     def _render_image_upload(self):
         """Render image and document upload interface"""
         
-        st.markdown("### Image & Document Processing")
+        st.markdown("### Image & Document Analysis")
+        st.markdown("Upload screenshots, PDFs, or images for immediate AI analysis and insights.")
         
         col1, col2 = st.columns([2, 1])
         
@@ -534,18 +535,22 @@ class DashboardRenderer:
             # Content type selection
             content_type = st.selectbox(
                 "What type of content are you uploading?",
-                ["Product Reviews", "Return Reports", "Product Listings", "Competitor Analysis"]
+                ["Product Reviews", "Return Reports", "Product Listings", "Competitor Analysis", "Market Research"]
             )
             
-            # ASIN association
-            target_asin = st.text_input("Associate with ASIN (optional)", placeholder="B0XXXXXXXXX")
+            # ASIN association (optional)
+            target_asin = st.text_input(
+                "Associate with ASIN (optional)", 
+                placeholder="B0XXXXXXXXX",
+                help="If you know the ASIN, enter it here. Otherwise, we'll try to detect it automatically."
+            )
             
             # File upload
             uploaded_files = st.file_uploader(
                 "Upload images or documents",
                 type=['jpg', 'jpeg', 'png', 'pdf'],
                 accept_multiple_files=True,
-                help="Upload screenshots of reviews, return reports, or product listings"
+                help="Upload screenshots of reviews, return reports, or product listings for AI analysis"
             )
             
             if uploaded_files:
@@ -554,50 +559,407 @@ class DashboardRenderer:
                 # Processing options
                 processing_method = st.radio(
                     "Processing method:",
-                    ["Auto (OCR + AI Vision)", "OCR Only", "AI Vision Only"],
-                    horizontal=True
+                    ["Auto (OCR + AI Vision)", "AI Vision Only", "OCR Only"],
+                    horizontal=True,
+                    help="Auto tries OCR first, then falls back to AI Vision if needed"
                 )
                 
-                if st.button("🔍 Process Files", use_container_width=True):
-                    with st.spinner("Processing files..."):
-                        # Simulate processing
-                        import time
-                        time.sleep(2)
+                # Analysis options
+                with st.expander("🎛️ Analysis Options"):
+                    run_immediate_analysis = st.checkbox(
+                        "Run AI analysis immediately after processing", 
+                        value=True,
+                        help="Generate AI insights right after extracting content"
+                    )
                     
-                    st.success("✅ Files processed successfully!")
+                    analysis_depth = st.selectbox(
+                        "Analysis depth:",
+                        ["Quick Insights", "Detailed Analysis", "Comprehensive Report"],
+                        help="Choose how detailed you want the AI analysis to be"
+                    )
                     
-                    # Show extracted data preview
-                    with st.expander("📄 Extracted Data Preview"):
-                        if content_type == "Product Reviews":
-                            st.markdown("**Extracted Reviews:**")
-                            st.markdown("• ⭐⭐⭐⭐⭐ Great product, very comfortable")
-                            st.markdown("• ⭐⭐⭐ Good quality but sizing runs small")
-                        elif content_type == "Return Reports":
-                            st.markdown("**Extracted Return Reasons:**")
-                            st.markdown("• Product arrived damaged")
-                            st.markdown("• Wrong size ordered")
+                    include_recommendations = st.checkbox(
+                        "Include actionable recommendations", 
+                        value=True,
+                        help="Generate specific action items and improvement suggestions"
+                    )
+                
+                if st.button("🔍 Process & Analyze Files", type="primary", use_container_width=True):
+                    self._process_and_analyze_files(
+                        uploaded_files, content_type, target_asin, processing_method,
+                        run_immediate_analysis, analysis_depth, include_recommendations
+                    )
         
         with col2:
             st.markdown("### Processing Status")
             
-            # OCR availability
-            ocr_status = "✅ Available" if True else "❌ Unavailable"
+            # Show API availability
+            api_available = st.session_state.api_status.get('available', False)
+            if api_available:
+                st.success("✅ AI Analysis Available")
+            else:
+                st.error("❌ AI Analysis Unavailable")
+                st.caption("Configure OpenAI API key for AI analysis")
+            
+            # OCR availability  
+            ocr_available = st.session_state.module_status.get('pytesseract', False)
+            ocr_status = "✅ Available" if ocr_available else "⚠️ Limited (Cloud)"
             st.markdown(f"**OCR Processing:** {ocr_status}")
             
-            # AI Vision availability  
-            ai_status = "✅ Available" if True else "❌ Unavailable"
-            st.markdown(f"**AI Vision:** {ai_status}")
+            if not ocr_available:
+                st.caption("OCR disabled for cloud deployment. AI Vision will be used instead.")
             
-            st.markdown("### Supported Formats")
+            st.markdown("### Supported Content")
             st.markdown("""
             **Images:**
             - JPG, JPEG, PNG
             - Screenshots, photos
+            - Product listings, reviews
             
             **Documents:** 
             - PDF files
             - Multi-page documents
+            - Reports, presentations
+            
+            **Auto-Detection:**
+            - ASINs (B0XXXXXXXXX)
+            - Product prices
+            - Star ratings
+            - Review counts
             """)
+        
+        # Display recent analysis results
+        if hasattr(st.session_state, 'image_analysis_results') and st.session_state.image_analysis_results:
+            self._display_recent_image_analysis()
+    
+    def _process_and_analyze_files(self, uploaded_files, content_type, target_asin, 
+                                 processing_method, run_immediate_analysis, 
+                                 analysis_depth, include_recommendations):
+        """Process uploaded files and run AI analysis"""
+        
+        try:
+            # Initialize results storage
+            if 'image_analysis_results' not in st.session_state:
+                st.session_state.image_analysis_results = []
+            
+            processed_files = []
+            analysis_results = []
+            
+            # Process each file
+            for uploaded_file in uploaded_files:
+                with st.spinner(f"Processing {uploaded_file.name}..."):
+                    
+                    # Read file data
+                    file_data = uploaded_file.read()
+                    filename = uploaded_file.name
+                    
+                    # Process file to extract text
+                    from upload_handler import UploadHandler
+                    upload_handler = UploadHandler()
+                    
+                    result = upload_handler.process_image_document(
+                        file_data, filename, content_type, target_asin
+                    )
+                    
+                    if result['success']:
+                        processed_files.append(result)
+                        
+                        # Show what was detected
+                        structured_data = result.get('structured_data', {})
+                        
+                        if 'detected_asins' in structured_data:
+                            st.info(f"🔍 Detected ASINs in {filename}: {', '.join(structured_data['detected_asins'])}")
+                        
+                        if 'product_info' in structured_data:
+                            product_info = structured_data['product_info']
+                            info_items = []
+                            for key, value in product_info.items():
+                                if key.startswith('detected_'):
+                                    display_key = key.replace('detected_', '').replace('_', ' ').title()
+                                    if isinstance(value, float):
+                                        if 'price' in key:
+                                            info_items.append(f"{display_key}: ${value:.2f}")
+                                        elif 'rating' in key:
+                                            info_items.append(f"{display_key}: {value}★")
+                                        else:
+                                            info_items.append(f"{display_key}: {value}")
+                                    else:
+                                        display_value = str(value)[:50] + "..." if len(str(value)) > 50 else str(value)
+                                        info_items.append(f"{display_key}: {display_value}")
+                            
+                            if info_items:
+                                st.info(f"📋 Detected from {filename}: {' | '.join(info_items)}")
+                        
+                        # Run AI analysis if requested
+                        if run_immediate_analysis and st.session_state.api_status.get('available', False):
+                            
+                            analysis_result = self._run_image_ai_analysis(
+                                result, content_type, analysis_depth, include_recommendations
+                            )
+                            
+                            if analysis_result:
+                                analysis_results.append(analysis_result)
+                        
+                    else:
+                        st.error(f"❌ Failed to process {filename}: {', '.join(result.get('errors', ['Unknown error']))}")
+            
+            # Store results and display summary
+            if processed_files:
+                # Add to session state
+                timestamp = datetime.now().isoformat()
+                batch_result = {
+                    'timestamp': timestamp,
+                    'content_type': content_type,
+                    'files': processed_files,
+                    'analysis_results': analysis_results,
+                    'settings': {
+                        'processing_method': processing_method,
+                        'analysis_depth': analysis_depth,
+                        'include_recommendations': include_recommendations
+                    }
+                }
+                
+                st.session_state.image_analysis_results.append(batch_result)
+                
+                # Display success summary
+                st.success(f"✅ Successfully processed {len(processed_files)} files")
+                
+                if analysis_results:
+                    st.success(f"🧠 Generated AI analysis for {len(analysis_results)} files")
+                    
+                    # Show quick preview of first analysis
+                    if analysis_results:
+                        with st.expander("📊 Analysis Preview", expanded=True):
+                            first_analysis = analysis_results[0]
+                            st.markdown(f"**File:** {first_analysis['filename']}")
+                            st.markdown(f"**AI Insights:**")
+                            st.markdown(first_analysis['ai_insights'][:500] + "..." if len(first_analysis['ai_insights']) > 500 else first_analysis['ai_insights'])
+                
+                # Offer to view full results
+                if st.button("📋 View Full Analysis Results", use_container_width=True):
+                    st.session_state['show_image_analysis_tab'] = True
+                    st.rerun()
+                
+        except Exception as e:
+            logger.error(f"Error processing and analyzing files: {str(e)}")
+            st.error(f"❌ Processing failed: {str(e)}")
+    
+    def _run_image_ai_analysis(self, file_result, content_type, analysis_depth, include_recommendations):
+        """Run AI analysis on processed file content"""
+        
+        try:
+            from enhanced_ai_analysis import EnhancedAIAnalyzer
+            ai_analyzer = EnhancedAIAnalyzer()
+            
+            # Check API availability
+            if not ai_analyzer.get_api_status().get('available', False):
+                return None
+            
+            # Extract content for analysis
+            extracted_text = file_result.get('text', '')
+            structured_data = file_result.get('structured_data', {})
+            filename = file_result.get('filename', 'unknown')
+            
+            # Create analysis prompt based on content type and depth
+            analysis_prompt = self._create_image_analysis_prompt(
+                extracted_text, structured_data, content_type, analysis_depth, include_recommendations
+            )
+            
+            # Call AI API for analysis
+            from enhanced_ai_analysis import APIClient
+            api_client = APIClient()
+            
+            messages = [
+                {
+                    "role": "system", 
+                    "content": "You are an expert Amazon listing optimization analyst specializing in medical device e-commerce. Provide specific, actionable insights based on the content provided."
+                },
+                {
+                    "role": "user",
+                    "content": analysis_prompt
+                }
+            ]
+            
+            with st.spinner(f"Analyzing {filename} with AI..."):
+                response = api_client.call_api(messages, max_tokens=1500)
+            
+            if response['success']:
+                return {
+                    'filename': filename,
+                    'content_type': content_type,
+                    'analysis_depth': analysis_depth,
+                    'ai_insights': response['result'],
+                    'extracted_text_preview': extracted_text[:200] + "..." if len(extracted_text) > 200 else extracted_text,
+                    'detected_data': structured_data,
+                    'timestamp': datetime.now().isoformat()
+                }
+            else:
+                st.error(f"AI analysis failed for {filename}: {response.get('error', 'Unknown error')}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error running AI analysis on image: {str(e)}")
+            st.error(f"AI analysis error: {str(e)}")
+            return None
+    
+    def _create_image_analysis_prompt(self, extracted_text, structured_data, content_type, analysis_depth, include_recommendations):
+        """Create AI analysis prompt based on content and settings"""
+        
+        prompt = f"""Analyze this {content_type.lower()} content extracted from an uploaded image/document.
+
+EXTRACTED CONTENT:
+{extracted_text}
+
+"""
+        
+        # Add detected structured data if available
+        if structured_data:
+            prompt += "DETECTED PRODUCT DATA:\n"
+            for key, value in structured_data.items():
+                if key.startswith('detected_') or key in ['product_info', 'detected_asins']:
+                    prompt += f"- {key}: {value}\n"
+            prompt += "\n"
+        
+        # Customize prompt based on content type
+        if content_type == "Product Reviews":
+            prompt += """ANALYSIS FOCUS:
+1. Customer sentiment and satisfaction patterns
+2. Common complaints and praise points
+3. Product quality and performance issues
+4. Size, fit, and usability concerns
+5. Features customers value most
+6. Listing accuracy vs. customer expectations"""
+            
+        elif content_type == "Return Reports":
+            prompt += """ANALYSIS FOCUS:
+1. Primary return reason categories
+2. Patterns in return explanations
+3. Quality vs. expectation issues
+4. Actionable improvement opportunities
+5. Cost impact and prevention strategies"""
+            
+        elif content_type == "Product Listings":
+            prompt += """ANALYSIS FOCUS:
+1. Title and keyword optimization opportunities
+2. Bullet point effectiveness
+3. Image and description quality
+4. Competitive positioning
+5. Conversion optimization potential
+6. Missing information or features"""
+            
+        elif content_type == "Competitor Analysis":
+            prompt += """ANALYSIS FOCUS:
+1. Competitive advantages and weaknesses
+2. Pricing and positioning strategy
+3. Feature comparison opportunities
+4. Market positioning insights
+5. Differentiation strategies"""
+        
+        # Adjust depth based on setting
+        if analysis_depth == "Quick Insights":
+            prompt += "\n\nProvide 3-5 key insights with brief explanations (200-300 words)."
+        elif analysis_depth == "Detailed Analysis":
+            prompt += "\n\nProvide comprehensive analysis with specific examples and evidence (400-600 words)."
+        else:  # Comprehensive Report
+            prompt += "\n\nProvide detailed analysis with actionable recommendations, implementation guidance, and expected outcomes (600-800 words)."
+        
+        if include_recommendations:
+            prompt += "\n\nInclude specific, actionable recommendations with priority levels (High/Medium/Low) and expected impact."
+        
+        return prompt
+    
+    def _display_recent_image_analysis(self):
+        """Display recent image analysis results"""
+        
+        st.markdown("### 📊 Recent Image Analysis Results")
+        
+        recent_results = st.session_state.image_analysis_results[-3:]  # Show last 3 batches
+        
+        for i, batch in enumerate(reversed(recent_results)):
+            timestamp = datetime.fromisoformat(batch['timestamp']).strftime('%Y-%m-%d %H:%M')
+            
+            with st.expander(f"📁 Analysis {len(recent_results)-i}: {batch['content_type']} - {timestamp}"):
+                
+                col1, col2 = st.columns([2, 1])
+                
+                with col1:
+                    st.markdown(f"**Content Type:** {batch['content_type']}")
+                    st.markdown(f"**Files Processed:** {len(batch['files'])}")
+                    st.markdown(f"**Analysis Depth:** {batch['settings']['analysis_depth']}")
+                    
+                    # Show files processed
+                    file_names = [f['filename'] for f in batch['files']]
+                    st.markdown(f"**Files:** {', '.join(file_names)}")
+                
+                with col2:
+                    # Export options for this batch
+                    if batch['analysis_results']:
+                        # Create consolidated report
+                        report_text = self._create_batch_report(batch)
+                        
+                        st.download_button(
+                            label="📥 Download Report",
+                            data=report_text,
+                            file_name=f"image_analysis_{timestamp.replace(':', '')}.md",
+                            mime="text/markdown",
+                            key=f"download_batch_{i}"
+                        )
+                
+                # Show analysis results
+                if batch['analysis_results']:
+                    st.markdown("#### AI Analysis Results:")
+                    
+                    for result in batch['analysis_results']:
+                        st.markdown(f"**{result['filename']}:**")
+                        
+                        # Show preview
+                        insights = result['ai_insights']
+                        if len(insights) > 300:
+                            st.markdown(insights[:300] + "...")
+                            
+                            # Full insights in expandable section
+                            with st.expander(f"Full Analysis - {result['filename']}"):
+                                st.markdown(insights)
+                        else:
+                            st.markdown(insights)
+                        
+                        st.markdown("---")
+    
+    def _create_batch_report(self, batch):
+        """Create a consolidated report for a batch of analyzed files"""
+        
+        timestamp = datetime.fromisoformat(batch['timestamp']).strftime('%Y-%m-%d %H:%M:%S')
+        
+        report = f"""# Image Analysis Report
+**Generated:** {timestamp}
+**Content Type:** {batch['content_type']}
+**Analysis Depth:** {batch['settings']['analysis_depth']}
+
+## Files Analyzed
+"""
+        
+        for file_info in batch['files']:
+            report += f"- {file_info['filename']} ({file_info.get('processing_method', 'Unknown method')})\n"
+        
+        report += "\n## Analysis Results\n\n"
+        
+        for result in batch['analysis_results']:
+            report += f"### {result['filename']}\n"
+            report += f"**Content Type:** {result['content_type']}\n"
+            report += f"**Analysis Date:** {result['timestamp']}\n\n"
+            
+            if result.get('detected_data'):
+                report += "**Detected Information:**\n"
+                for key, value in result['detected_data'].items():
+                    if key.startswith('detected_') or key in ['product_info', 'detected_asins']:
+                        report += f"- {key}: {value}\n"
+                report += "\n"
+            
+            report += "**AI Insights:**\n"
+            report += result['ai_insights']
+            report += "\n\n---\n\n"
+        
+        return report
     
     def render_scoring_dashboard(self, scores: Dict[str, Any]):
         """Render main scoring dashboard"""
@@ -773,15 +1135,473 @@ class DashboardRenderer:
                         for driver in component_score.key_drivers:
                             st.markdown(f"• {driver}")
     
-    def render_ai_chat_tab(self):
-        """Render AI chat tab with embedded chat interface"""
-        try:
-            from ai_chat import AIChatInterface
-            chat_interface = AIChatInterface()
-            chat_interface.render_chat_interface()
-        except ImportError:
-            st.error("AI Chat module not available. Please ensure ai_chat.py is in your project directory.")
-            st.info("The AI Chat feature provides standalone consulting without requiring data uploads.")
+    def render_image_analysis_tab(self):
+        """Render dedicated tab for image analysis results and management"""
+        
+        st.markdown("## 🖼️ Image & Document Analysis")
+        st.markdown("Standalone AI analysis of uploaded images and documents - no sales data required!")
+        
+        # Check if we have any results
+        if not hasattr(st.session_state, 'image_analysis_results') or not st.session_state.image_analysis_results:
+            st.info("📸 No image analysis results yet.")
+            st.markdown("**To get started:**")
+            st.markdown("1. Go to the **Data Import** tab")
+            st.markdown("2. Upload images or PDFs in the **Images & Documents** section")
+            st.markdown("3. Enable 'Run AI analysis immediately' option")
+            st.markdown("4. Your results will appear here!")
+            
+            # Quick upload option
+            with st.expander("🚀 Quick Upload & Analysis"):
+                st.markdown("Upload and analyze files directly from this tab:")
+                
+                quick_files = st.file_uploader(
+                    "Choose files for quick analysis",
+                    type=['jpg', 'jpeg', 'png', 'pdf'],
+                    accept_multiple_files=True,
+                    key="quick_image_upload"
+                )
+                
+                if quick_files:
+                    quick_content_type = st.selectbox(
+                        "Content type:",
+                        ["Product Reviews", "Return Reports", "Product Listings", "Competitor Analysis"],
+                        key="quick_content_type"
+                    )
+                    
+                    if st.button("🔍 Analyze Now", type="primary"):
+                        self._process_and_analyze_files(
+                            quick_files, quick_content_type, "", "Auto (OCR + AI Vision)",
+                            True, "Detailed Analysis", True
+                        )
+                        st.rerun()
+            
+            return
+        
+        # Display analysis management interface
+        analysis_results = st.session_state.image_analysis_results
+        
+        # Summary statistics
+        col1, col2, col3, col4 = st.columns(4)
+        
+        total_batches = len(analysis_results)
+        total_files = sum(len(batch['files']) for batch in analysis_results)
+        total_analyses = sum(len(batch['analysis_results']) for batch in analysis_results)
+        
+        with col1:
+            st.metric("Analysis Sessions", total_batches)
+        
+        with col2:
+            st.metric("Files Processed", total_files)
+        
+        with col3:
+            st.metric("AI Analyses", total_analyses)
+        
+        with col4:
+            if total_analyses > 0:
+                success_rate = (total_analyses / total_files) * 100 if total_files > 0 else 0
+                st.metric("Success Rate", f"{success_rate:.0f}%")
+        
+        # Analysis results display
+        analysis_tabs = st.tabs(["📊 All Results", "🔍 Search & Filter", "📥 Bulk Export"])
+        
+        with analysis_tabs[0]:
+            self._display_all_image_results(analysis_results)
+        
+        with analysis_tabs[1]:
+            self._display_filtered_image_results(analysis_results)
+        
+        with analysis_tabs[2]:
+            self._display_bulk_export_options(analysis_results)
+    
+    def _display_all_image_results(self, analysis_results):
+        """Display all image analysis results"""
+        
+        st.markdown("### All Analysis Results")
+        
+        # Reverse to show most recent first
+        for i, batch in enumerate(reversed(analysis_results)):
+            batch_index = len(analysis_results) - 1 - i
+            timestamp = datetime.fromisoformat(batch['timestamp']).strftime('%Y-%m-%d %H:%M')
+            
+            # Batch header
+            col1, col2, col3 = st.columns([3, 1, 1])
+            
+            with col1:
+                st.markdown(f"#### 📁 Session {batch_index + 1}: {batch['content_type']}")
+                st.caption(f"📅 {timestamp} | 📄 {len(batch['files'])} files | 🧠 {len(batch['analysis_results'])} analyses")
+            
+            with col2:
+                # Individual batch export
+                if batch['analysis_results']:
+                    report_text = self._create_batch_report(batch)
+                    st.download_button(
+                        label="📥 Export",
+                        data=report_text,
+                        file_name=f"analysis_session_{batch_index + 1}_{timestamp.replace(':', '')}.md",
+                        mime="text/markdown",
+                        key=f"export_batch_{batch_index}",
+                        help="Download this analysis session"
+                    )
+            
+            with col3:
+                # Delete batch option
+                if st.button("🗑️ Delete", key=f"delete_batch_{batch_index}", help="Delete this analysis session"):
+                    st.session_state.image_analysis_results.pop(batch_index)
+                    st.rerun()
+            
+            # Batch content
+            with st.expander(f"View Details - Session {batch_index + 1}", expanded=(i == 0)):
+                
+                # Settings used
+                settings = batch['settings']
+                st.markdown(f"**Settings:** {settings['processing_method']} | {settings['analysis_depth']} | Recommendations: {'✅' if settings['include_recommendations'] else '❌'}")
+                
+                # Files processed
+                st.markdown("**Files Processed:**")
+                for file_info in batch['files']:
+                    status = "✅" if file_info['success'] else "❌"
+                    method = file_info.get('processing_method', 'Unknown')
+                    st.markdown(f"- {status} {file_info['filename']} ({method})")
+                
+                # Analysis results
+                if batch['analysis_results']:
+                    st.markdown("**AI Analysis Results:**")
+                    
+                    for j, result in enumerate(batch['analysis_results']):
+                        with st.expander(f"📄 {result['filename']} - {result['content_type']}"):
+                            
+                            # Show detected data if available
+                            if result.get('detected_data'):
+                                st.markdown("**Detected Information:**")
+                                detected = result['detected_data']
+                                
+                                if 'detected_asins' in detected:
+                                    st.markdown(f"🔍 **ASINs:** {', '.join(detected['detected_asins'])}")
+                                
+                                if 'product_info' in detected:
+                                    info = detected['product_info']
+                                    info_display = []
+                                    for key, value in info.items():
+                                        if key.startswith('detected_'):
+                                            clean_key = key.replace('detected_', '').replace('_', ' ').title()
+                                            if 'price' in key and isinstance(value, (int, float)):
+                                                info_display.append(f"{clean_key}: ${value:.2f}")
+                                            elif 'rating' in key:
+                                                info_display.append(f"{clean_key}: {value}★")
+                                            else:
+                                                info_display.append(f"{clean_key}: {value}")
+                                    
+                                    if info_display:
+                                        st.markdown(f"📋 **Product Info:** {' | '.join(info_display)}")
+                            
+                            # AI insights
+                            st.markdown("**AI Insights:**")
+                            st.markdown(result['ai_insights'])
+                            
+                            # Individual file export
+                            individual_report = f"""# Analysis Report: {result['filename']}
+**Content Type:** {result['content_type']}  
+**Analysis Date:** {result['timestamp']}  
+**Analysis Depth:** {result['analysis_depth']}
+
+## Detected Information
+{json.dumps(result.get('detected_data', {}), indent=2)}
+
+## Extracted Content Preview
+{result.get('extracted_text_preview', 'No preview available')}
+
+## AI Analysis
+{result['ai_insights']}
+"""
+                            
+                            st.download_button(
+                                label="📥 Export Individual Report",
+                                data=individual_report,
+                                file_name=f"analysis_{result['filename']}_{datetime.now().strftime('%Y%m%d_%H%M')}.md",
+                                mime="text/markdown",
+                                key=f"export_individual_{batch_index}_{j}"
+                            )
+                
+                st.markdown("---")
+    
+    def _display_filtered_image_results(self, analysis_results):
+        """Display filtered and searchable image results"""
+        
+        st.markdown("### Search & Filter Results")
+        
+        # Filter controls
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            # Content type filter
+            all_content_types = list(set(batch['content_type'] for batch in analysis_results))
+            selected_content_types = st.multiselect(
+                "Content Types:",
+                options=all_content_types,
+                default=all_content_types
+            )
+        
+        with col2:
+            # Date range filter
+            if analysis_results:
+                min_date = min(datetime.fromisoformat(batch['timestamp']).date() for batch in analysis_results)
+                max_date = max(datetime.fromisoformat(batch['timestamp']).date() for batch in analysis_results)
+                
+                selected_date_range = st.date_input(
+                    "Date Range:",
+                    value=(min_date, max_date),
+                    min_value=min_date,
+                    max_value=max_date
+                )
+        
+        with col3:
+            # Search term
+            search_term = st.text_input(
+                "Search in results:",
+                placeholder="Enter keywords to search in AI insights..."
+            )
+        
+        # Apply filters
+        filtered_results = []
+        
+        for batch in analysis_results:
+            batch_date = datetime.fromisoformat(batch['timestamp']).date()
+            
+            # Apply filters
+            if (batch['content_type'] in selected_content_types and
+                (len(selected_date_range) == 2 and selected_date_range[0] <= batch_date <= selected_date_range[1])):
+                
+                # Apply search term if provided
+                if search_term:
+                    matching_analyses = []
+                    for analysis in batch['analysis_results']:
+                        if search_term.lower() in analysis['ai_insights'].lower():
+                            matching_analyses.append(analysis)
+                    
+                    if matching_analyses:
+                        filtered_batch = batch.copy()
+                        filtered_batch['analysis_results'] = matching_analyses
+                        filtered_results.append(filtered_batch)
+                else:
+                    filtered_results.append(batch)
+        
+        # Display filtered results
+        if filtered_results:
+            st.markdown(f"**Found {len(filtered_results)} sessions matching your criteria**")
+            
+            for batch in filtered_results:
+                timestamp = datetime.fromisoformat(batch['timestamp']).strftime('%Y-%m-%d %H:%M')
+                
+                with st.expander(f"📁 {batch['content_type']} - {timestamp}"):
+                    for analysis in batch['analysis_results']:
+                        st.markdown(f"**📄 {analysis['filename']}**")
+                        
+                        # Highlight search terms
+                        insights = analysis['ai_insights']
+                        if search_term:
+                            # Simple highlighting (could be enhanced)
+                            highlighted = insights.replace(
+                                search_term, 
+                                f"**{search_term}**"
+                            )
+                            st.markdown(highlighted)
+                        else:
+                            st.markdown(insights)
+                        
+                        st.markdown("---")
+        else:
+            st.info("No results match your filter criteria.")
+    
+    def _display_bulk_export_options(self, analysis_results):
+        """Display bulk export options for all image analysis results"""
+        
+        st.markdown("### Bulk Export Options")
+        
+        if not analysis_results:
+            st.info("No analysis results to export.")
+            return
+        
+        # Export format selection
+        export_format = st.selectbox(
+            "Export format:",
+            ["Markdown Report", "CSV Summary", "JSON Data"]
+        )
+        
+        # Content selection
+        include_options = st.multiselect(
+            "Include in export:",
+            ["AI Insights", "Detected Data", "Processing Details", "File Information"],
+            default=["AI Insights", "Detected Data"]
+        )
+        
+        # Generate export based on format
+        if st.button("📥 Generate Bulk Export", type="primary"):
+            
+            if export_format == "Markdown Report":
+                export_data = self._generate_bulk_markdown_report(analysis_results, include_options)
+                file_name = f"bulk_image_analysis_report_{datetime.now().strftime('%Y%m%d_%H%M')}.md"
+                mime_type = "text/markdown"
+                
+            elif export_format == "CSV Summary":
+                export_data = self._generate_bulk_csv_summary(analysis_results, include_options)
+                file_name = f"image_analysis_summary_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
+                mime_type = "text/csv"
+                
+            else:  # JSON Data
+                export_data = self._generate_bulk_json_export(analysis_results, include_options)
+                file_name = f"image_analysis_data_{datetime.now().strftime('%Y%m%d_%H%M')}.json"
+                mime_type = "application/json"
+            
+            st.download_button(
+                label=f"📥 Download {export_format}",
+                data=export_data,
+                file_name=file_name,
+                mime=mime_type
+            )
+        
+        # Quick stats
+        st.markdown("### Export Preview")
+        
+        total_analyses = sum(len(batch['analysis_results']) for batch in analysis_results)
+        content_type_counts = {}
+        
+        for batch in analysis_results:
+            content_type = batch['content_type']
+            content_type_counts[content_type] = content_type_counts.get(content_type, 0) + len(batch['analysis_results'])
+        
+        st.markdown(f"**Total Analyses:** {total_analyses}")
+        st.markdown("**By Content Type:**")
+        for content_type, count in content_type_counts.items():
+            st.markdown(f"- {content_type}: {count}")
+    
+    def _generate_bulk_markdown_report(self, analysis_results, include_options):
+        """Generate bulk markdown report"""
+        
+        report = f"""# Comprehensive Image Analysis Report
+**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+**Total Sessions:** {len(analysis_results)}
+**Total Analyses:** {sum(len(batch['analysis_results']) for batch in analysis_results)}
+
+"""
+        
+        for i, batch in enumerate(analysis_results):
+            timestamp = datetime.fromisoformat(batch['timestamp']).strftime('%Y-%m-%d %H:%M:%S')
+            
+            report += f"""## Session {i + 1}: {batch['content_type']}
+**Date:** {timestamp}
+**Files Processed:** {len(batch['files'])}
+**AI Analyses:** {len(batch['analysis_results'])}
+
+"""
+            
+            if "Processing Details" in include_options:
+                settings = batch['settings']
+                report += f"""**Processing Settings:**
+- Method: {settings['processing_method']}
+- Analysis Depth: {settings['analysis_depth']}
+- Include Recommendations: {settings['include_recommendations']}
+
+"""
+            
+            for analysis in batch['analysis_results']:
+                report += f"### {analysis['filename']}\n\n"
+                
+                if "Detected Data" in include_options and analysis.get('detected_data'):
+                    report += "**Detected Information:**\n"
+                    for key, value in analysis['detected_data'].items():
+                        report += f"- {key}: {value}\n"
+                    report += "\n"
+                
+                if "AI Insights" in include_options:
+                    report += "**AI Analysis:**\n"
+                    report += analysis['ai_insights']
+                    report += "\n\n"
+                
+                report += "---\n\n"
+        
+        return report
+    
+    def _generate_bulk_csv_summary(self, analysis_results, include_options):
+        """Generate bulk CSV summary"""
+        
+        data = []
+        
+        for batch_idx, batch in enumerate(analysis_results):
+            timestamp = datetime.fromisoformat(batch['timestamp']).strftime('%Y-%m-%d %H:%M:%S')
+            
+            for analysis in batch['analysis_results']:
+                row = {
+                    'Session': batch_idx + 1,
+                    'Timestamp': timestamp,
+                    'Content_Type': batch['content_type'],
+                    'Filename': analysis['filename'],
+                    'Analysis_Depth': analysis['analysis_depth']
+                }
+                
+                if "Detected Data" in include_options:
+                    detected = analysis.get('detected_data', {})
+                    row['Detected_ASINs'] = ', '.join(detected.get('detected_asins', []))
+                    
+                    product_info = detected.get('product_info', {})
+                    row['Detected_Price'] = product_info.get('detected_price', '')
+                    row['Detected_Rating'] = product_info.get('detected_rating', '')
+                    row['Detected_Title'] = product_info.get('detected_title', '')
+                
+                if "AI Insights" in include_options:
+                    # Truncate for CSV
+                    insights = analysis['ai_insights']
+                    row['AI_Insights_Preview'] = insights[:200] + "..." if len(insights) > 200 else insights
+                
+                data.append(row)
+        
+        df = pd.DataFrame(data)
+        return df.to_csv(index=False)
+    
+    def _generate_bulk_json_export(self, analysis_results, include_options):
+        """Generate bulk JSON export"""
+        
+        export_data = {
+            'generated_at': datetime.now().isoformat(),
+            'total_sessions': len(analysis_results),
+            'export_options': include_options,
+            'sessions': []
+        }
+        
+        for batch in analysis_results:
+            session_data = {
+                'timestamp': batch['timestamp'],
+                'content_type': batch['content_type'],
+                'files_count': len(batch['files']),
+                'analyses_count': len(batch['analysis_results'])
+            }
+            
+            if "Processing Details" in include_options:
+                session_data['settings'] = batch['settings']
+            
+            if "File Information" in include_options:
+                session_data['files'] = batch['files']
+            
+            session_data['analyses'] = []
+            
+            for analysis in batch['analysis_results']:
+                analysis_data = {
+                    'filename': analysis['filename'],
+                    'content_type': analysis['content_type'],
+                    'analysis_depth': analysis['analysis_depth'],
+                    'timestamp': analysis['timestamp']
+                }
+                
+                if "Detected Data" in include_options:
+                    analysis_data['detected_data'] = analysis.get('detected_data', {})
+                
+                if "AI Insights" in include_options:
+                    analysis_data['ai_insights'] = analysis['ai_insights']
+                
+                session_data['analyses'].append(analysis_data)
+            
+            export_data['sessions'].append(session_data)
+        
+        return json.dumps(export_data, indent=2)
     
     def render_ai_analysis_dashboard(self, ai_results: Dict[str, Any]):
         """Render enhanced AI analysis dashboard with manual triggers"""
@@ -1612,7 +2432,8 @@ class ProfessionalDashboard:
             "📁 Data Import", 
             "📊 Performance Scores", 
             "🤖 AI Chat",
-            "🧠 AI Analysis", 
+            "🧠 AI Analysis",
+            "🖼️ Image Analysis", 
             "📋 Export & Reports"
         ])
         
@@ -1629,6 +2450,9 @@ class ProfessionalDashboard:
             self.renderer.render_ai_analysis_dashboard(st.session_state.ai_analysis_results)
         
         with main_tabs[4]:
+            self.renderer.render_image_analysis_tab()
+        
+        with main_tabs[5]:
             self.renderer.render_export_dashboard(
                 st.session_state.scored_products,
                 st.session_state.ai_analysis_results
