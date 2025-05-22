@@ -576,7 +576,33 @@ class ApplicationController:
                         st.session_state.uploaded_data['documents'] = []
                     
                     st.session_state.uploaded_data['documents'].append(result)
-                    st.success(f"✅ Successfully processed {filename}")
+                    
+                    # Show detected ASINs and product info
+                    structured_data = result.get('structured_data', {})
+                    
+                    if 'detected_asins' in structured_data:
+                        detected_asins = structured_data['detected_asins']
+                        st.success(f"✅ Successfully processed {filename}")
+                        st.info(f"🔍 Detected ASINs: {', '.join(detected_asins)}")
+                        
+                        # Auto-associate with primary ASIN if not manually specified
+                        if not asin and 'primary_asin' in structured_data:
+                            result['asin'] = structured_data['primary_asin']
+                            st.info(f"📎 Auto-associated with ASIN: {structured_data['primary_asin']}")
+                    
+                    if 'product_info' in structured_data:
+                        product_info = structured_data['product_info']
+                        info_items = []
+                        if 'detected_price' in product_info:
+                            info_items.append(f"Price: ${product_info['detected_price']:.2f}")
+                        if 'detected_rating' in product_info:
+                            info_items.append(f"Rating: {product_info['detected_rating']}★")
+                        if 'detected_title' in product_info:
+                            info_items.append(f"Title: {product_info['detected_title'][:50]}...")
+                        
+                        if info_items:
+                            st.info(f"📋 Detected info: {' | '.join(info_items)}")
+                    
                     return True
                 else:
                     st.error(f"❌ Processing failed: {', '.join(result.get('errors', ['Unknown error']))}")
@@ -771,6 +797,80 @@ class ApplicationController:
             if self.process_data():
                 st.rerun()
             st.session_state['processing_in_progress'] = False
+        
+        # Handle individual AI analysis trigger
+        if 'run_individual_ai_analysis' in st.session_state:
+            target_asin = st.session_state['run_individual_ai_analysis']
+            del st.session_state['run_individual_ai_analysis']
+            
+            if self._run_individual_ai_analysis(target_asin):
+                st.success(f"✅ AI analysis complete for {target_asin}")
+                st.rerun()
+        
+        # Handle bulk AI analysis trigger
+        if 'run_bulk_ai_analysis' in st.session_state:
+            del st.session_state['run_bulk_ai_analysis']
+            
+            if self.run_ai_analysis():
+                st.rerun()
+    
+    def _run_individual_ai_analysis(self, target_asin: str) -> bool:
+        """Run AI analysis for a specific product"""
+        
+        try:
+            if not st.session_state.data_processed or not st.session_state.processed_data:
+                st.error("No processed data available for AI analysis.")
+                return False
+            
+            # Check API status
+            if not st.session_state.api_status.get('available', False):
+                st.error("❌ AI analysis not available. Please check your API configuration.")
+                return False
+            
+            processed_data = st.session_state.processed_data
+            products = processed_data['products']
+            reviews_data = processed_data['reviews']
+            returns_data = processed_data['returns']
+            
+            # Find target product
+            target_product = next((p for p in products if p['asin'] == target_asin), None)
+            if not target_product:
+                st.error(f"Product {target_asin} not found in processed data.")
+                return False
+            
+            # Get data for this product
+            product_reviews = reviews_data.get(target_asin, [])
+            product_returns = returns_data.get(target_asin, [])
+            
+            if not product_reviews and not product_returns:
+                st.warning(f"No review or return data found for {target_asin}. AI analysis requires customer feedback data.")
+                return False
+            
+            # Set progress flag
+            st.session_state['ai_analysis_in_progress'] = True
+            
+            with st.spinner(f"Running AI analysis for {target_product['name']}..."):
+                # Run comprehensive analysis for this product
+                analysis_results = self.ai_analyzer.analyze_product_comprehensive(
+                    target_product, product_reviews, product_returns
+                )
+                
+                # Store results
+                if target_asin not in st.session_state.ai_analysis_results:
+                    st.session_state.ai_analysis_results[target_asin] = {}
+                
+                st.session_state.ai_analysis_results[target_asin] = analysis_results
+                st.session_state.ai_analysis_complete = True
+            
+            # Clear progress flag
+            st.session_state['ai_analysis_in_progress'] = False
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error running individual AI analysis for {target_asin}: {str(e)}")
+            st.error(f"❌ AI analysis failed for {target_asin}: {str(e)}")
+            st.session_state['ai_analysis_in_progress'] = False
+            return False
 
 def main():
     """Application entry point"""
