@@ -3,7 +3,7 @@ Amazon Review Analyzer - Listing Optimization Focus
 AI-powered analysis of Amazon review data for listing improvements
 
 Author: Assistant
-Version: 5.0 - Listing Optimization Focused
+Version: 5.1 - Enhanced with AI Chat & Better Formatting
 """
 
 import streamlit as st
@@ -33,11 +33,12 @@ def safe_import(module_name):
 # Import your custom modules
 enhanced_ai_analysis, ai_available = safe_import('enhanced_ai_analysis')
 upload_handler, upload_available = safe_import('upload_handler')
+ai_chat, chat_available = safe_import('ai_chat')
 
 # Application configuration
 APP_CONFIG = {
     'title': 'Amazon Review Analyzer - Listing Optimization',
-    'version': '5.0',
+    'version': '5.1',
     'description': 'AI-powered Amazon review analysis for listing improvements',
     'max_file_size_mb': 50,
     'supported_formats': ['.csv', '.xlsx']
@@ -53,7 +54,11 @@ def initialize_session_state():
         'ai_analyzer': None,
         'ai_status': None,
         'error_message': None,
-        'success_message': None
+        'success_message': None,
+        'show_chat': False,
+        'current_listing_title': '',
+        'current_listing_description': '',
+        'chat_session': None
     }
     
     for key, value in defaults.items():
@@ -92,6 +97,11 @@ def display_ai_status():
         if status.get('available'):
             st.success("✅ AI Analysis Ready")
             st.caption("GPT-4o powered insights available")
+            
+            # AI Chat toggle
+            if st.button("💬 Open AI Chat", use_container_width=True):
+                st.session_state.show_chat = True
+                st.rerun()
         else:
             st.error("❌ AI Analysis Unavailable")
             st.caption(status.get('error', 'Unknown error'))
@@ -110,6 +120,59 @@ def display_ai_status():
                    OPENAI_API_KEY=your-api-key-here
                    ```
                 """)
+
+def display_ai_chat():
+    """Display AI chat interface"""
+    if not st.session_state.show_chat or not chat_available:
+        return
+    
+    with st.expander("💬 AI Listing Optimization Chat", expanded=True):
+        col1, col2 = st.columns([5, 1])
+        
+        with col2:
+            if st.button("❌ Close"):
+                st.session_state.show_chat = False
+                st.rerun()
+        
+        with col1:
+            st.markdown("**Ask questions about listing optimization, get advice, or discuss your analysis results**")
+        
+        # Initialize chat session if needed
+        if st.session_state.chat_session is None and chat_available:
+            st.session_state.chat_session = ai_chat.ChatSession('listing_optimizer')
+        
+        # Chat interface
+        if st.session_state.chat_session:
+            # Display chat history
+            for message in st.session_state.chat_session.messages[-10:]:  # Show last 10 messages
+                role = message['role']
+                content = message['content']
+                
+                if role == 'user':
+                    with st.chat_message("user"):
+                        st.markdown(content)
+                else:
+                    with st.chat_message("assistant"):
+                        st.markdown(content)
+            
+            # Chat input
+            user_input = st.chat_input("Ask about listing optimization...")
+            
+            if user_input:
+                # Add context about current analysis if available
+                context_message = user_input
+                if st.session_state.analysis_results:
+                    context_message = f"Context: I'm analyzing Amazon reviews for listing optimization. Current question: {user_input}"
+                
+                with st.chat_message("user"):
+                    st.markdown(user_input)
+                
+                with st.chat_message("assistant"):
+                    with st.spinner("Thinking..."):
+                        response = st.session_state.chat_session.send_message(context_message)
+                    st.markdown(response)
+                
+                st.rerun()
 
 def load_example_data():
     """Load example data for demonstration"""
@@ -151,6 +214,30 @@ def load_example_data():
 def handle_file_upload():
     """Handle file upload interface"""
     st.markdown("## 📁 Upload Amazon Review Data")
+    
+    # Optional listing information section
+    with st.expander("📝 Current Listing Information (Optional)", expanded=False):
+        st.markdown("Paste your current listing title and description to get comparison insights")
+        
+        current_title = st.text_area(
+            "Current Listing Title:",
+            value=st.session_state.current_listing_title,
+            height=100,
+            placeholder="Paste your current Amazon listing title here..."
+        )
+        
+        current_description = st.text_area(
+            "Current Listing Description:",
+            value=st.session_state.current_listing_description,
+            height=200,
+            placeholder="Paste your current Amazon listing description/bullet points here..."
+        )
+        
+        if st.button("💾 Save Listing Info"):
+            st.session_state.current_listing_title = current_title
+            st.session_state.current_listing_description = current_description
+            st.success("✅ Listing information saved")
+    
     st.markdown("Upload your Amazon review export (CSV or Excel) for AI-powered listing optimization insights")
     
     # File uploader
@@ -278,6 +365,9 @@ def display_data_summary():
     
     st.markdown("## 📊 Review Data Summary")
     
+    # Show AI chat option
+    display_ai_chat()
+    
     # Metrics
     col1, col2, col3, col4 = st.columns(4)
     
@@ -335,7 +425,7 @@ def run_ai_analysis():
         with st.spinner("🤖 Running AI analysis... This may take a moment."):
             data = st.session_state.uploaded_data
             
-            # Create listing optimization focused prompt
+            # Create comprehensive listing optimization analysis
             result = analyze_for_listing_optimization(
                 data['product_info'], 
                 data['reviews']
@@ -360,96 +450,70 @@ def run_ai_analysis():
         st.session_state.processing = False
 
 def analyze_for_listing_optimization(product_info, reviews):
-    """Run AI analysis focused on listing optimization"""
+    """Run comprehensive AI analysis focused on listing optimization"""
     try:
-        # Prepare reviews for AI analysis
-        review_texts = []
-        for review in reviews[:50]:  # Limit to 50 reviews for token management
-            text = f"Rating: {review['rating']}/5\n"
-            text += f"Title: {review['title']}\n"
-            text += f"Review: {review['body']}\n"
-            review_texts.append(text)
+        # Prepare comprehensive review analysis
+        review_summaries = []
+        for review in reviews[:30]:  # Use more reviews for better analysis
+            summary = f"Rating: {review['rating']}/5 stars\n"
+            summary += f"Title: {review.get('title', '')}\n"
+            summary += f"Review: {review.get('body', '')}\n"
+            summary += f"Verified: {'Yes' if review.get('verified') else 'No'}\n"
+            review_summaries.append(summary)
         
-        combined_reviews = "\n---\n".join(review_texts)
+        # Include current listing context if available
+        listing_context = ""
+        if st.session_state.current_listing_title or st.session_state.current_listing_description:
+            listing_context = f"\n\nCURRENT LISTING INFO:\n"
+            if st.session_state.current_listing_title:
+                listing_context += f"Current Title: {st.session_state.current_listing_title}\n"
+            if st.session_state.current_listing_description:
+                listing_context += f"Current Description: {st.session_state.current_listing_description}\n"
         
-        # Create listing optimization prompt
+        # Use your existing AI analyzer with enhanced prompts
         prompt = f"""
-        Analyze these Amazon reviews for listing optimization insights. Focus on actionable improvements for the product listing.
+        Analyze these Amazon customer reviews for comprehensive listing optimization insights.
         
         Product ASIN: {product_info.get('asin', 'Unknown')}
-        Total Reviews Analyzed: {len(review_texts)}
+        Total Reviews: {len(review_summaries)}
+        {listing_context}
         
-        Reviews:
-        {combined_reviews}
+        CUSTOMER REVIEWS:
+        {chr(10).join(review_summaries)}
         
-        Provide analysis in this JSON format:
-        {{
-            "listing_optimization": {{
-                "title_improvements": ["specific keyword suggestions", "title structure improvements"],
-                "bullet_point_gaps": ["missing features customers mention", "benefits to highlight"],
-                "image_recommendations": ["what images customers want to see", "angles/scenarios to show"],
-                "description_enhancements": ["details to add", "pain points to address"]
-            }},
-            "customer_insights": {{
-                "love_most": [["feature", "example quote"]],
-                "hate_most": [["issue", "example quote"]],
-                "common_complaints": [["complaint", "frequency", "suggested fix"]],
-                "unexpected_uses": ["use cases not highlighted in listing"],
-                "size_fit_issues": ["sizing guidance needed"]
-            }},
-            "content_optimization": {{
-                "faq_needed": ["questions customers have"],
-                "confusion_points": ["what customers don't understand"],
-                "missing_specs": ["specifications customers want"],
-                "competitor_mentions": ["what customers compare to"]
-            }},
-            "conversion_opportunities": {{
-                "trust_signals": ["what builds confidence"],
-                "hesitation_points": ["what makes customers hesitate"],
-                "price_feedback": ["price-related comments"],
-                "urgency_triggers": ["what makes customers buy"]
-            }},
-            "summary": {{
-                "overall_sentiment": "positive/negative/mixed",
-                "key_strengths": ["top 3 strengths"],
-                "critical_issues": ["top 3 issues to fix"],
-                "listing_score": "0-100 based on review feedback"
-            }}
-        }}
+        Provide detailed analysis in structured format focusing on:
+        
+        1. LISTING OPTIMIZATION RECOMMENDATIONS
+        2. CUSTOMER SENTIMENT ANALYSIS  
+        3. CONTENT GAPS AND OPPORTUNITIES
+        4. COMPETITIVE POSITIONING INSIGHTS
+        5. IMMEDIATE ACTION ITEMS
+        
+        Format your response clearly with headers and bullet points for easy reading.
         """
         
-        # Use your AI analyzer
-        api_result = st.session_state.ai_analyzer.api_client.call_api([
-            {"role": "system", "content": "You are an Amazon listing optimization expert specializing in converting customer feedback into actionable listing improvements."},
-            {"role": "user", "content": prompt}
-        ])
+        # Call your AI analyzer
+        result = st.session_state.ai_analyzer.analyze_reviews_comprehensive(
+            product_info, 
+            reviews
+        )
         
-        if api_result['success']:
-            try:
-                analysis = json.loads(api_result['result'])
-                return {
-                    'success': True,
-                    'analysis': analysis,
-                    'ai_powered': True,
-                    'reviews_analyzed': len(review_texts),
-                    'timestamp': datetime.now().isoformat()
-                }
-            except json.JSONDecodeError:
-                # If JSON parsing fails, return raw response
-                return {
-                    'success': True,
-                    'raw_analysis': api_result['result'],
-                    'ai_powered': True,
-                    'reviews_analyzed': len(review_texts),
-                    'timestamp': datetime.now().isoformat()
-                }
+        if result.get('success'):
+            return {
+                'success': True,
+                'ai_analysis': result,
+                'reviews_analyzed': len(review_summaries),
+                'timestamp': datetime.now().isoformat(),
+                'has_listing_context': bool(listing_context)
+            }
         else:
             return {
                 'success': False,
-                'error': api_result.get('error', 'AI analysis failed')
+                'error': result.get('error', 'AI analysis failed')
             }
             
     except Exception as e:
+        logger.error(f"Analysis error: {str(e)}")
         return {
             'success': False,
             'error': str(e)
@@ -470,9 +534,6 @@ def run_basic_analysis():
         
         positive_reviews = [r for r in reviews if r['rating'] >= 4]
         negative_reviews = [r for r in reviews if r['rating'] <= 2]
-        
-        # Simple keyword analysis
-        all_text = ' '.join([r['body'].lower() for r in reviews if r['body']]).lower()
         
         # Basic insights
         basic_analysis = {
@@ -507,153 +568,69 @@ def display_analysis_results():
     
     results = st.session_state.analysis_results
     
-    if results.get('ai_powered'):
-        display_ai_results(results)
+    st.markdown("## 🤖 AI Analysis Results")
+    
+    # Show AI chat for discussing results
+    display_ai_chat()
+    
+    if results.get('ai_analysis'):
+        display_comprehensive_ai_results(results)
     else:
         display_basic_results(results)
 
-def display_ai_results(results):
-    """Display AI-powered analysis results"""
-    st.markdown("## 🤖 AI Analysis Results")
+def display_comprehensive_ai_results(results):
+    """Display comprehensive AI analysis results with better formatting"""
+    ai_analysis = results['ai_analysis']
     
-    # Check if we have structured analysis or raw analysis
-    if 'analysis' in results:
-        analysis = results['analysis']
-        
-        # Create tabs for different aspects
-        tab1, tab2, tab3, tab4 = st.tabs([
-            "🎯 Listing Optimization",
-            "💡 Customer Insights", 
-            "📝 Content Gaps",
-            "💰 Conversion Opportunities"
-        ])
-        
-        with tab1:
-            display_listing_optimization(analysis.get('listing_optimization', {}))
-        
-        with tab2:
-            display_customer_insights(analysis.get('customer_insights', {}))
-        
-        with tab3:
-            display_content_optimization(analysis.get('content_optimization', {}))
-        
-        with tab4:
-            display_conversion_opportunities(analysis.get('conversion_opportunities', {}))
-        
-        # Summary at the bottom
-        if 'summary' in analysis:
-            display_summary(analysis['summary'])
-    
-    elif 'raw_analysis' in results:
-        # Display raw AI response if JSON parsing failed
-        st.markdown("### AI Analysis Results")
-        st.markdown(results['raw_analysis'])
-
-def display_listing_optimization(optimization_data):
-    """Display listing optimization recommendations"""
-    st.markdown("### 🎯 Listing Optimization Recommendations")
-    
-    if optimization_data.get('title_improvements'):
-        st.markdown("**📝 Title Improvements:**")
-        for improvement in optimization_data['title_improvements']:
-            st.markdown(f"• {improvement}")
-    
-    if optimization_data.get('bullet_point_gaps'):
-        st.markdown("**🔸 Bullet Point Enhancements:**")
-        for gap in optimization_data['bullet_point_gaps']:
-            st.markdown(f"• {gap}")
-    
-    if optimization_data.get('image_recommendations'):
-        st.markdown("**📸 Image Recommendations:**")
-        for rec in optimization_data['image_recommendations']:
-            st.markdown(f"• {rec}")
-    
-    if optimization_data.get('description_enhancements'):
-        st.markdown("**📄 Description Enhancements:**")
-        for enhancement in optimization_data['description_enhancements']:
-            st.markdown(f"• {enhancement}")
-
-def display_customer_insights(insights_data):
-    """Display customer insights"""
-    st.markdown("### 💡 Customer Insights")
-    
-    col1, col2 = st.columns(2)
+    # Summary metrics at top
+    col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        if insights_data.get('love_most'):
-            st.markdown("**😍 What Customers Love:**")
-            for item in insights_data['love_most']:
-                if isinstance(item, list) and len(item) >= 2:
-                    st.markdown(f"• **{item[0]}**: {item[1]}")
+        st.metric("Reviews Analyzed", results.get('reviews_analyzed', 0))
     
     with col2:
-        if insights_data.get('hate_most'):
-            st.markdown("**😤 What Customers Dislike:**")
-            for item in insights_data['hate_most']:
-                if isinstance(item, list) and len(item) >= 2:
-                    st.markdown(f"• **{item[0]}**: {item[1]}")
-    
-    if insights_data.get('common_complaints'):
-        st.markdown("**⚠️ Common Complaints & Fixes:**")
-        for complaint in insights_data['common_complaints']:
-            if isinstance(complaint, list) and len(complaint) >= 3:
-                st.markdown(f"• **Issue**: {complaint[0]} | **Fix**: {complaint[2]}")
-
-def display_content_optimization(content_data):
-    """Display content optimization suggestions"""
-    st.markdown("### 📝 Content Optimization")
-    
-    if content_data.get('faq_needed'):
-        st.markdown("**❓ FAQ Items to Add:**")
-        for faq in content_data['faq_needed']:
-            st.markdown(f"• {faq}")
-    
-    if content_data.get('confusion_points'):
-        st.markdown("**🤔 Customer Confusion Points:**")
-        for point in content_data['confusion_points']:
-            st.markdown(f"• {point}")
-    
-    if content_data.get('missing_specs'):
-        st.markdown("**📋 Missing Specifications:**")
-        for spec in content_data['missing_specs']:
-            st.markdown(f"• {spec}")
-
-def display_conversion_opportunities(conversion_data):
-    """Display conversion optimization opportunities"""
-    st.markdown("### 💰 Conversion Opportunities")
-    
-    if conversion_data.get('trust_signals'):
-        st.markdown("**✅ Trust Building Opportunities:**")
-        for signal in conversion_data['trust_signals']:
-            st.markdown(f"• {signal}")
-    
-    if conversion_data.get('hesitation_points'):
-        st.markdown("**🤚 Customer Hesitation Points:**")
-        for point in conversion_data['hesitation_points']:
-            st.markdown(f"• {point}")
-
-def display_summary(summary_data):
-    """Display analysis summary"""
-    st.markdown("### 📊 Analysis Summary")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        sentiment = summary_data.get('overall_sentiment', 'Unknown')
-        st.metric("Overall Sentiment", sentiment.title())
-    
-    with col2:
-        score = summary_data.get('listing_score', 'N/A')
-        st.metric("Listing Score", f"{score}/100" if isinstance(score, (int, float)) else score)
+        st.metric("AI Analysis", "✅ Complete")
     
     with col3:
-        strengths = summary_data.get('key_strengths', [])
-        st.metric("Key Strengths", len(strengths))
+        sentiment = ai_analysis.get('overall_sentiment', 'Unknown')
+        st.metric("Overall Sentiment", sentiment.title())
     
-    if summary_data.get('critical_issues'):
-        st.markdown("**🔴 Critical Issues to Address:**")
-        for issue in summary_data['critical_issues']:
-            st.markdown(f"• {issue}")
+    with col4:
+        if results.get('has_listing_context'):
+            st.metric("Listing Context", "✅ Included")
+        else:
+            st.metric("Listing Context", "❌ Not Provided")
+    
+    # Main analysis sections
+    if ai_analysis.get('listing_improvements'):
+        st.markdown("### 🎯 Listing Optimization Recommendations")
+        st.info(ai_analysis['listing_improvements'])
+    
+    if ai_analysis.get('safety_concerns'):
+        st.markdown("### ⚠️ Customer Concerns")
+        for concern in ai_analysis['safety_concerns']:
+            st.warning(f"• {concern}")
+    
+    if ai_analysis.get('top_quality_issues'):
+        st.markdown("### 🔍 Top Issues to Address")
+        for i, issue in enumerate(ai_analysis['top_quality_issues'], 1):
+            st.markdown(f"**{i}.** {issue}")
+    
+    if ai_analysis.get('immediate_actions'):
+        st.markdown("### 🚀 Immediate Action Items")
+        for action in ai_analysis['immediate_actions']:
+            st.markdown(f"• {action}")
+    
+    if ai_analysis.get('customer_education'):
+        st.markdown("### 📚 Customer Education Opportunities")
+        st.info(ai_analysis['customer_education'])
+    
+    # Raw AI response for debugging
+    with st.expander("🔍 View Raw AI Analysis"):
+        if ai_analysis.get('raw_response'):
+            st.text(ai_analysis['raw_response'])
+        else:
+            st.json(ai_analysis)
 
 def display_basic_results(results):
     """Display basic analysis results"""
@@ -711,7 +688,7 @@ def main():
             display_analysis_results()
             
             # Action buttons
-            col1, col2 = st.columns(2)
+            col1, col2, col3 = st.columns(3)
             with col1:
                 if st.button("🔄 Analyze New Data", use_container_width=True):
                     st.session_state.current_step = 'upload'
@@ -720,6 +697,11 @@ def main():
                     st.rerun()
             
             with col2:
+                if st.button("💬 Discuss Results", use_container_width=True):
+                    st.session_state.show_chat = True
+                    st.rerun()
+            
+            with col3:
                 if st.button("📥 Export Results", use_container_width=True):
                     st.info("📥 Export functionality coming soon!")
         
