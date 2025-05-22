@@ -932,18 +932,272 @@ class EnhancedCategoryAnalyzer:
         
         return False
 
+class AIEnhancedAnalyzer:
+    """AI-powered analyzer using OpenAI GPT-4o for sophisticated medical device review analysis"""
+    
+    def __init__(self):
+        self.api_key = self._get_api_key()
+        self.base_url = "https://api.openai.com/v1/chat/completions"
+        self.headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}" if self.api_key else ""
+        }
+    
+    def _get_api_key(self) -> Optional[str]:
+        """Get API key from multiple sources"""
+        try:
+            import streamlit as st
+            if hasattr(st, 'secrets') and 'openai_api_key' in st.secrets:
+                logger.info("Found API key in Streamlit secrets")
+                return st.secrets['openai_api_key']
+        except (ImportError, AttributeError, KeyError):
+            pass
+        
+        import os
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if api_key:
+            logger.info("Found API key in environment variables")
+            return api_key
+        
+        logger.warning("No API key found - AI analysis will be disabled")
+        return None
+    
+    def is_available(self) -> bool:
+        """Check if AI analysis is available"""
+        return self.api_key is not None
+    
+    def analyze_reviews_with_ai(self, review_batch: List[ReviewItem], 
+                               product_info: Dict[str, Any]) -> Dict[str, Any]:
+        """Use AI to analyze a batch of reviews for medical device quality insights"""
+        if not self.is_available():
+            return {'success': False, 'error': 'AI API not available'}
+        
+        try:
+            # Prepare review text for AI analysis
+            review_texts = []
+            for i, review in enumerate(review_batch[:10], 1):  # Limit to 10 reviews per batch
+                rating_text = f" (Rating: {review.rating}/5)" if review.rating else ""
+                review_text = f"Review {i}{rating_text}: {review.text[:500]}"  # Limit length
+                review_texts.append(review_text)
+            
+            # Create AI prompt for medical device analysis
+            prompt = self._create_medical_device_analysis_prompt(
+                product_info, review_texts
+            )
+            
+            # Make API call
+            response = self._call_openai_api(prompt)
+            
+            if response['success']:
+                # Parse AI response
+                ai_insights = self._parse_ai_response(response['content'])
+                return {
+                    'success': True,
+                    'ai_insights': ai_insights,
+                    'token_usage': response.get('usage', {}),
+                    'reviews_analyzed': len(review_batch)
+                }
+            else:
+                return {'success': False, 'error': response['error']}
+                
+        except Exception as e:
+            logger.error(f"AI analysis error: {str(e)}")
+            return {'success': False, 'error': str(e)}
+    
+    def _create_medical_device_analysis_prompt(self, product_info: Dict[str, Any], 
+                                             review_texts: List[str]) -> str:
+        """Create specialized prompt for medical device quality analysis"""
+        
+        product_name = product_info.get('name', 'Unknown Product')
+        product_category = product_info.get('category', 'Medical Device')
+        
+        return f"""You are an expert medical device quality manager analyzing customer reviews for ISO 13485 compliance and quality improvement. 
+
+PRODUCT: {product_name}
+CATEGORY: {product_category}
+ASIN: {product_info.get('asin', 'Unknown')}
+
+CUSTOMER REVIEWS TO ANALYZE:
+{chr(10).join(review_texts)}
+
+Please provide a comprehensive quality analysis in this EXACT format:
+
+## QUALITY CATEGORIZATION
+For each review, identify which medical device quality categories apply:
+
+SAFETY_CONCERNS: [List review numbers that indicate safety issues - injuries, product failures, hazards]
+EFFICACY_PERFORMANCE: [List review numbers about product not working, ineffective treatment, poor performance]
+COMFORT_USABILITY: [List review numbers about discomfort, difficulty using, poor ergonomics]
+DURABILITY_QUALITY: [List review numbers about breaking, poor construction, material failures]
+SIZING_FIT: [List review numbers about wrong size, poor fit, measurement issues]
+ASSEMBLY_INSTRUCTIONS: [List review numbers about difficult setup, unclear instructions, missing parts]
+BIOCOMPATIBILITY: [List review numbers about skin reactions, allergies, material sensitivity]
+SHIPPING_PACKAGING: [List review numbers about shipping damage, poor packaging]
+
+## RISK ASSESSMENT
+CRITICAL_ISSUES: [Any safety hazards, injuries, or regulatory concerns requiring immediate action]
+HIGH_PRIORITY: [Quality issues affecting multiple customers or product effectiveness]
+MEDIUM_PRIORITY: [Comfort, usability, or moderate quality concerns]
+LOW_PRIORITY: [Minor issues like packaging or shipping]
+
+## SENTIMENT ANALYSIS
+OVERALL_SENTIMENT: [Positive/Negative/Mixed with confidence percentage]
+RATING_CORRELATION: [How text sentiment aligns with star ratings - note any discrepancies]
+EMOTIONAL_INDICATORS: [Strong emotional language, urgency, frustration, satisfaction]
+
+## ROOT CAUSE ANALYSIS
+DESIGN_ISSUES: [Problems with product design or engineering]
+MANUFACTURING_ISSUES: [Quality control, materials, or production problems]
+DOCUMENTATION_ISSUES: [Unclear instructions, missing information, labeling problems]
+EXPECTATION_MISALIGNMENT: [Customer expectations vs actual product capabilities]
+
+## MEDICAL DEVICE INSIGHTS
+THERAPEUTIC_EFFECTIVENESS: [How well the device performs its intended medical function]
+USER_SAFETY_PROFILE: [Any safety concerns specific to medical device use]
+PATIENT_COMPLIANCE_FACTORS: [Issues that might affect patient adherence or proper use]
+CLINICAL_OUTCOMES: [Impact on patient health, recovery, or quality of life]
+
+## CAPA RECOMMENDATIONS
+IMMEDIATE_ACTIONS: [Critical fixes needed within 24-48 hours]
+SHORT_TERM_FIXES: [Improvements needed within 1-4 weeks]
+LONG_TERM_IMPROVEMENTS: [Design or process changes for future iterations]
+REGULATORY_CONSIDERATIONS: [Any FDA, ISO 13485, or other compliance implications]
+
+## ACTIONABLE_INSIGHTS
+LISTING_OPTIMIZATION: [Specific changes to Amazon listing to set proper expectations]
+PRODUCT_IMPROVEMENTS: [Engineering or design modifications needed]
+CUSTOMER_EDUCATION: [Additional guidance or instructions needed for customers]
+QUALITY_MONITORING: [Key metrics to track for ongoing quality management]
+
+Focus on actionable insights that a medical device quality manager can implement immediately to improve customer satisfaction and regulatory compliance."""
+    
+    def _call_openai_api(self, prompt: str) -> Dict[str, Any]:
+        """Make API call to OpenAI GPT-4o"""
+        if not MODULES_AVAILABLE.get('requests', False):
+            return {'success': False, 'error': 'Requests module not available'}
+        
+        import requests
+        
+        payload = {
+            "model": "gpt-4o",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are an expert medical device quality manager with deep knowledge of ISO 13485, FDA regulations, and customer feedback analysis for medical devices."
+                },
+                {
+                    "role": "user", 
+                    "content": prompt
+                }
+            ],
+            "temperature": 0.1,  # Low temperature for consistent analysis
+            "max_tokens": 2000
+        }
+        
+        try:
+            response = requests.post(
+                self.base_url,
+                headers=self.headers,
+                data=json.dumps(payload),
+                timeout=60
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                return {
+                    'success': True,
+                    'content': result['choices'][0]['message']['content'],
+                    'usage': result.get('usage', {})
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': f"API error {response.status_code}: {response.text}"
+                }
+                
+        except Exception as e:
+            return {'success': False, 'error': f"API call failed: {str(e)}"}
+    
+    def _parse_ai_response(self, ai_content: str) -> Dict[str, Any]:
+        """Parse structured AI response into actionable insights"""
+        insights = {
+            'quality_categorization': {},
+            'risk_assessment': {},
+            'sentiment_analysis': {},
+            'root_cause_analysis': {},
+            'medical_device_insights': {},
+            'capa_recommendations': {},
+            'actionable_insights': {}
+        }
+        
+        try:
+            # Extract each section using regex
+            sections = {
+                'quality_categorization': r'## QUALITY CATEGORIZATION\s*\n(.*?)(?=## |$)',
+                'risk_assessment': r'## RISK ASSESSMENT\s*\n(.*?)(?=## |$)',
+                'sentiment_analysis': r'## SENTIMENT ANALYSIS\s*\n(.*?)(?=## |$)',
+                'root_cause_analysis': r'## ROOT CAUSE ANALYSIS\s*\n(.*?)(?=## |$)',
+                'medical_device_insights': r'## MEDICAL DEVICE INSIGHTS\s*\n(.*?)(?=## |$)',
+                'capa_recommendations': r'## CAPA RECOMMENDATIONS\s*\n(.*?)(?=## |$)',
+                'actionable_insights': r'## ACTIONABLE_INSIGHTS\s*\n(.*?)(?=## |$)'
+            }
+            
+            for section_name, pattern in sections.items():
+                match = re.search(pattern, ai_content, re.DOTALL)
+                if match:
+                    section_content = match.group(1).strip()
+                    insights[section_name] = self._parse_section_content(section_content)
+            
+            return insights
+            
+        except Exception as e:
+            logger.error(f"Error parsing AI response: {str(e)}")
+            return {'error': f"Failed to parse AI response: {str(e)}"}
+    
+    def _parse_section_content(self, content: str) -> Dict[str, Any]:
+        """Parse individual section content"""
+        parsed = {}
+        
+        # Split by lines and parse key-value pairs
+        lines = content.split('\n')
+        for line in lines:
+            line = line.strip()
+            if ':' in line and not line.startswith('##'):
+                key, value = line.split(':', 1)
+                key = key.strip().lower().replace(' ', '_')
+                value = value.strip()
+                
+                if value.startswith('[') and value.endswith(']'):
+                    # Parse list content
+                    list_content = value[1:-1].strip()
+                    if list_content:
+                        parsed[key] = [item.strip() for item in list_content.split(',')]
+                    else:
+                        parsed[key] = []
+                else:
+                    parsed[key] = value
+        
+        return parsed
+
 class TextAnalysisEngine:
     """
-    Enhanced Text Analysis Engine optimized for Helium 10 review processing
+    AI-Enhanced Text Analysis Engine optimized for Helium 10 review processing
     
-    This is the core analytical engine that processes customer reviews from Helium 10 exports
-    and provides comprehensive quality management insights for medical device companies.
+    This engine combines rule-based analysis with AI-powered insights using OpenAI GPT-4o
+    to provide comprehensive quality management insights for medical device companies.
     """
     
     def __init__(self):
-        """Initialize the enhanced text analysis engine"""
+        """Initialize the AI-enhanced text analysis engine"""
         self.text_processor = AdvancedReviewProcessor()
         self.category_analyzer = EnhancedCategoryAnalyzer()
+        self.ai_analyzer = AIEnhancedAnalyzer()
+        
+        # Check AI availability
+        if self.ai_analyzer.is_available():
+            logger.info("AI-Enhanced Text Analysis Engine initialized - OpenAI GPT-4o available")
+        else:
+            logger.warning("AI-Enhanced Text Analysis Engine initialized - AI analysis disabled (no API key)")
         
         logger.info("Enhanced Text Analysis Engine initialized - Optimized for Helium 10 reviews")
     
@@ -951,7 +1205,7 @@ class TextAnalysisEngine:
                                 product_info: Dict[str, Any],
                                 date_filter: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
-        Main analysis function optimized for Helium 10 review data
+        AI-Enhanced analysis function optimized for Helium 10 review data
         
         Args:
             review_data: List of review items from Helium 10 export
@@ -959,7 +1213,7 @@ class TextAnalysisEngine:
             date_filter: Optional date range filter
             
         Returns:
-            Comprehensive analysis results
+            Comprehensive analysis results with AI insights
         """
         try:
             # Convert to enhanced ReviewItem objects
@@ -974,34 +1228,66 @@ class TextAnalysisEngine:
                 review_items = self._apply_date_filter(review_items, date_filter)
                 logger.info(f"Date filter applied: {len(review_items)} reviews remaining")
             
-            # Enhanced sentiment analysis
+            # Enhanced sentiment analysis (baseline)
             self._calculate_enhanced_sentiments(review_items)
             
-            # Category analysis with enhanced features
+            # AI-POWERED ANALYSIS (NEW)
+            ai_insights = {}
+            if self.ai_analyzer.is_available() and len(review_items) > 0:
+                logger.info("Running AI-powered analysis on customer reviews...")
+                
+                # Process reviews in batches for AI analysis
+                batch_size = 10  # Optimal for API token limits
+                all_ai_insights = []
+                
+                for i in range(0, len(review_items), batch_size):
+                    batch = review_items[i:i + batch_size]
+                    batch_insights = self.ai_analyzer.analyze_reviews_with_ai(batch, product_info)
+                    
+                    if batch_insights.get('success'):
+                        all_ai_insights.append(batch_insights['ai_insights'])
+                        logger.info(f"AI analysis completed for batch {i//batch_size + 1}")
+                    else:
+                        logger.warning(f"AI analysis failed for batch {i//batch_size + 1}: {batch_insights.get('error')}")
+                
+                # Consolidate AI insights
+                if all_ai_insights:
+                    ai_insights = self._consolidate_ai_insights(all_ai_insights)
+                    logger.info(f"AI analysis completed - {len(all_ai_insights)} batches processed")
+                else:
+                    logger.warning("No AI insights generated - falling back to rule-based analysis")
+            else:
+                logger.info("AI analysis not available - using rule-based analysis only")
+            
+            # Enhanced category analysis (combining rule-based + AI)
             category_results = self.category_analyzer.analyze_reviews_by_categories(review_items)
             
-            # Enhanced quality assessment
-            quality_assessment = self._assess_enhanced_quality(review_items, category_results)
+            # Enhance category results with AI insights
+            if ai_insights:
+                category_results = self._enhance_categories_with_ai(category_results, ai_insights)
             
-            # Enhanced CAPA generation
-            capa_recommendations = self._generate_enhanced_capa_recommendations(
-                category_results, quality_assessment, product_info.get('name', 'Unknown Product')
+            # Enhanced quality assessment (AI-informed)
+            quality_assessment = self._assess_enhanced_quality(review_items, category_results, ai_insights)
+            
+            # AI-Enhanced CAPA generation
+            capa_recommendations = self._generate_ai_enhanced_capa_recommendations(
+                category_results, quality_assessment, ai_insights, product_info.get('name', 'Unknown Product')
             )
             
-            # Risk assessment
-            risk_level, risk_score, risk_factors = self._calculate_enhanced_risk(
-                category_results, quality_assessment
+            # Enhanced risk assessment (AI-informed)
+            risk_level, risk_score, risk_factors = self._calculate_ai_enhanced_risk(
+                category_results, quality_assessment, ai_insights
             )
             
-            # Generate insights
-            key_insights = self._generate_enhanced_insights(
-                category_results, quality_assessment, review_items
+            # Generate AI-enhanced insights
+            key_insights = self._generate_ai_enhanced_insights(
+                category_results, quality_assessment, ai_insights, review_items
             )
             
             # Calculate confidence scores
             confidence_score = self._calculate_analysis_confidence(review_items, category_results)
             
-            # Prepare comprehensive results
+            # Prepare comprehensive results with AI insights
             result = {
                 'success': True,
                 'asin': product_info.get('asin', 'unknown'),
@@ -1009,12 +1295,16 @@ class TextAnalysisEngine:
                 'analysis_period': self._format_analysis_period(review_items, date_filter),
                 'total_reviews': len(review_items),
                 
-                # Core analysis results
+                # Core analysis results (enhanced with AI)
                 'category_analysis': {cat_id: asdict(analysis) for cat_id, analysis in category_results.items()},
                 'quality_assessment': asdict(quality_assessment),
                 'capa_recommendations': [asdict(capa) for capa in capa_recommendations],
                 
-                # Risk and insights
+                # AI-Enhanced insights
+                'ai_insights': ai_insights,
+                'ai_analysis_available': bool(ai_insights),
+                
+                # Risk and insights (AI-enhanced)
                 'overall_risk_level': risk_level,
                 'risk_score': risk_score,
                 'risk_factors': risk_factors,
@@ -1023,16 +1313,17 @@ class TextAnalysisEngine:
                 # Metadata
                 'analysis_timestamp': datetime.now().isoformat(),
                 'confidence_score': confidence_score,
-                'export_source': 'helium10_reviews'
+                'export_source': 'helium10_reviews',
+                'analysis_method': 'ai_enhanced' if ai_insights else 'rule_based'
             }
             
-            logger.info(f"Helium 10 analysis completed for {product_info.get('name', 'Unknown')}: "
+            logger.info(f"AI-Enhanced Helium 10 analysis completed for {product_info.get('name', 'Unknown')}: "
                        f"{len(review_items)} reviews analyzed, {len(capa_recommendations)} CAPA items generated")
             
             return result
             
         except Exception as e:
-            logger.error(f"Error in Helium 10 analysis: {str(e)}")
+            logger.error(f"Error in AI-Enhanced Helium 10 analysis: {str(e)}")
             return self._create_empty_result(product_info, error=str(e))
     
     def _prepare_helium10_reviews(self, review_data: List[Dict[str, Any]], 
@@ -1194,56 +1485,364 @@ class TextAnalysisEngine:
             primary_concerns=primary_concerns
         )
     
-    def _generate_enhanced_capa_recommendations(self, category_results: Dict[str, CategoryAnalysis],
-                                              quality_assessment: QualityAssessment,
-                                              product_name: str) -> List[CAPARecommendation]:
-        """Generate enhanced CAPA recommendations with Helium 10 context"""
-        recommendations = []
-        capa_counter = 1
+    def _consolidate_ai_insights(self, all_ai_insights: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Consolidate AI insights from multiple batches"""
+        consolidated = {
+            'quality_categorization': {},
+            'risk_assessment': {},
+            'sentiment_analysis': {},
+            'root_cause_analysis': {},
+            'medical_device_insights': {},
+            'capa_recommendations': {},
+            'actionable_insights': {},
+            'confidence_score': 0.8  # High confidence for AI analysis
+        }
         
-        # Sort categories by risk score for priority
-        sorted_categories = sorted(
-            [(cat_id, analysis) for cat_id, analysis in category_results.items()],
-            key=lambda x: x[1].risk_score,
-            reverse=True
-        )
+        # Merge categorizations
+        all_categories = set()
+        for insights in all_ai_insights:
+            if 'quality_categorization' in insights:
+                for category, items in insights['quality_categorization'].items():
+                    if category not in consolidated['quality_categorization']:
+                        consolidated['quality_categorization'][category] = []
+                    if isinstance(items, list):
+                        consolidated['quality_categorization'][category].extend(items)
+                    all_categories.add(category)
         
-        for cat_id, analysis in sorted_categories:
-            if analysis.requires_capa:
-                # Get representative reviews for this category
-                representative_reviews = [
-                    review.text[:200] + "..." if len(review.text) > 200 else review.text
-                    for review in analysis.matched_reviews[:3]  # Top 3 examples
-                ]
+        # Merge risk assessments
+        risk_levels = ['critical_issues', 'high_priority', 'medium_priority', 'low_priority']
+        for level in risk_levels:
+            consolidated['risk_assessment'][level] = []
+            for insights in all_ai_insights:
+                if 'risk_assessment' in insights and level in insights['risk_assessment']:
+                    items = insights['risk_assessment'][level]
+                    if isinstance(items, list):
+                        consolidated['risk_assessment'][level].extend(items)
+        
+        # Take most recent sentiment analysis
+        if all_ai_insights and 'sentiment_analysis' in all_ai_insights[-1]:
+            consolidated['sentiment_analysis'] = all_ai_insights[-1]['sentiment_analysis']
+        
+        # Merge root cause analyses
+        consolidated['root_cause_analysis'] = {}
+        for insights in all_ai_insights:
+            if 'root_cause_analysis' in insights:
+                for cause_type, details in insights['root_cause_analysis'].items():
+                    if cause_type not in consolidated['root_cause_analysis']:
+                        consolidated['root_cause_analysis'][cause_type] = []
+                    if isinstance(details, list):
+                        consolidated['root_cause_analysis'][cause_type].extend(details)
+                    elif isinstance(details, str) and details:
+                        consolidated['root_cause_analysis'][cause_type].append(details)
+        
+        # Merge medical device insights
+        consolidated['medical_device_insights'] = {}
+        for insights in all_ai_insights:
+            if 'medical_device_insights' in insights:
+                for insight_type, details in insights['medical_device_insights'].items():
+                    if insight_type not in consolidated['medical_device_insights']:
+                        consolidated['medical_device_insights'][insight_type] = []
+                    if isinstance(details, list):
+                        consolidated['medical_device_insights'][insight_type].extend(details)
+                    elif isinstance(details, str) and details:
+                        consolidated['medical_device_insights'][insight_type].append(details)
+        
+        # Merge CAPA recommendations
+        capa_types = ['immediate_actions', 'short_term_fixes', 'long_term_improvements', 'regulatory_considerations']
+        for capa_type in capa_types:
+            consolidated['capa_recommendations'][capa_type] = []
+            for insights in all_ai_insights:
+                if 'capa_recommendations' in insights and capa_type in insights['capa_recommendations']:
+                    items = insights['capa_recommendations'][capa_type]
+                    if isinstance(items, list):
+                        consolidated['capa_recommendations'][capa_type].extend(items)
+                    elif isinstance(items, str) and items:
+                        consolidated['capa_recommendations'][capa_type].append(items)
+        
+        # Merge actionable insights
+        insight_types = ['listing_optimization', 'product_improvements', 'customer_education', 'quality_monitoring']
+        for insight_type in insight_types:
+            consolidated['actionable_insights'][insight_type] = []
+            for insights in all_ai_insights:
+                if 'actionable_insights' in insights and insight_type in insights['actionable_insights']:
+                    items = insights['actionable_insights'][insight_type]
+                    if isinstance(items, list):
+                        consolidated['actionable_insights'][insight_type].extend(items)
+                    elif isinstance(items, str) and items:
+                        consolidated['actionable_insights'][insight_type].append(items)
+        
+        return consolidated
+    
+    def _enhance_categories_with_ai(self, category_results: Dict[str, CategoryAnalysis], 
+                                  ai_insights: Dict[str, Any]) -> Dict[str, CategoryAnalysis]:
+        """Enhance rule-based category analysis with AI insights"""
+        
+        if not ai_insights or 'quality_categorization' not in ai_insights:
+            return category_results
+        
+        ai_categorization = ai_insights['quality_categorization']
+        
+        # Map AI categories to our framework
+        ai_category_mapping = {
+            'safety_concerns': 'safety_concerns',
+            'efficacy_performance': 'efficacy_performance', 
+            'comfort_usability': 'comfort_usability',
+            'durability_quality': 'durability_quality',
+            'sizing_fit': 'sizing_fit',
+            'assembly_instructions': 'assembly_instructions',
+            'biocompatibility': 'biocompatibility',
+            'shipping_packaging': 'shipping_packaging'
+        }
+        
+        # Enhance each category with AI insights
+        for ai_category, our_category in ai_category_mapping.items():
+            if ai_category in ai_categorization and our_category in category_results:
+                ai_identified_reviews = ai_categorization[ai_category]
                 
-                # Analyze rating impact
-                rating_impact = self._assess_rating_impact(analysis)
-                
-                # Determine trend
-                review_volume_trend = analysis.temporal_pattern.get('trend', 'stable')
-                
-                capa = self._create_enhanced_category_capa(
-                    f"CAPA-{capa_counter:03d}",
-                    cat_id,
-                    analysis,
-                    product_name,
-                    representative_reviews,
-                    rating_impact,
-                    review_volume_trend
-                )
-                recommendations.append(capa)
-                capa_counter += 1
+                # Add AI confidence boost to categories identified by AI
+                if ai_identified_reviews:
+                    analysis = category_results[our_category]
+                    # Boost risk score for AI-identified issues
+                    analysis.risk_score = min(analysis.risk_score * 1.2, 30.0)
+                    
+                    # Add AI insight flag
+                    if not hasattr(analysis, 'ai_confirmed'):
+                        analysis.ai_confirmed = True
+                        analysis.ai_insights = ai_identified_reviews
         
-        # Overall quality CAPA if needed
-        if quality_assessment.quality_score < 65:
-            overall_capa = self._create_enhanced_overall_quality_capa(
-                f"CAPA-{capa_counter:03d}",
-                quality_assessment,
-                product_name
-            )
-            recommendations.append(overall_capa)
+        return category_results
+    
+    def _assess_enhanced_quality(self, review_items: List[ReviewItem], 
+                               category_results: Dict[str, CategoryAnalysis],
+                               ai_insights: Dict[str, Any] = None) -> QualityAssessment:
+        """Enhanced quality assessment with AI insights"""
         
-        return recommendations
+        # Start with base assessment
+        quality_assessment = self._assess_base_quality(review_items, category_results)
+        
+        # Enhance with AI insights if available
+        if ai_insights:
+            # AI sentiment analysis override
+            if 'sentiment_analysis' in ai_insights:
+                ai_sentiment = ai_insights['sentiment_analysis']
+                
+                # Use AI overall sentiment if available and confident
+                if 'overall_sentiment' in ai_sentiment:
+                    ai_sentiment_text = ai_sentiment['overall_sentiment'].lower()
+                    if 'positive' in ai_sentiment_text:
+                        # AI indicates positive - boost quality score
+                        quality_assessment.quality_score = min(quality_assessment.quality_score * 1.1, 100)
+                    elif 'negative' in ai_sentiment_text:
+                        # AI indicates negative - reduce quality score
+                        quality_assessment.quality_score = max(quality_assessment.quality_score * 0.9, 0)
+            
+            # AI medical device insights
+            if 'medical_device_insights' in ai_insights:
+                medical_insights = ai_insights['medical_device_insights']
+                
+                # Safety profile assessment
+                if 'user_safety_profile' in medical_insights:
+                    safety_concerns = medical_insights['user_safety_profile']
+                    if isinstance(safety_concerns, list) and len(safety_concerns) > 0:
+                        # AI identified safety issues - major quality impact
+                        quality_assessment.quality_score = max(quality_assessment.quality_score - 20, 0)
+                        quality_assessment.safety_issues_count += len(safety_concerns)
+                
+                # Therapeutic effectiveness
+                if 'therapeutic_effectiveness' in medical_insights:
+                    effectiveness = medical_insights['therapeutic_effectiveness']
+                    if isinstance(effectiveness, list):
+                        for item in effectiveness:
+                            if isinstance(item, str) and ('ineffective' in item.lower() or 'not working' in item.lower()):
+                                quality_assessment.efficacy_issues_count += 1
+        
+        # Recalculate quality level based on AI-enhanced score
+        quality_assessment.quality_level = self._determine_quality_level(quality_assessment.quality_score)
+        
+        return quality_assessment
+    
+    def _generate_ai_enhanced_capa_recommendations(self, category_results: Dict[str, CategoryAnalysis],
+                                                 quality_assessment: QualityAssessment,
+                                                 ai_insights: Dict[str, Any],
+                                                 product_name: str) -> List[CAPARecommendation]:
+        """Generate CAPA recommendations enhanced with AI insights"""
+        
+        # Start with base CAPA recommendations
+        base_capas = self._generate_base_capa_recommendations(category_results, quality_assessment, product_name)
+        
+        # Enhance with AI-specific CAPAs
+        ai_capas = []
+        capa_counter = len(base_capas) + 1
+        
+        if ai_insights and 'capa_recommendations' in ai_insights:
+            ai_capa_data = ai_insights['capa_recommendations']
+            
+            # Immediate actions from AI
+            if 'immediate_actions' in ai_capa_data:
+                for action in ai_capa_data['immediate_actions']:
+                    if isinstance(action, str) and action.strip():
+                        ai_capa = CAPARecommendation(
+                            capa_id=f"AI-CAPA-{capa_counter:03d}",
+                            priority='Critical',
+                            category='AI-Identified Critical Issue',
+                            issue_description=f"AI analysis identified critical issue requiring immediate attention",
+                            root_cause_analysis="AI-powered analysis of customer feedback patterns",
+                            affected_customer_count=0,  # AI doesn't provide specific count
+                            customer_impact_assessment="High impact identified by AI analysis",
+                            representative_reviews=[],
+                            rating_impact="AI-identified rating impact",
+                            review_volume_trend="AI-analyzed trend",
+                            corrective_action=action,
+                            preventive_action="Implement AI-recommended preventive measures",
+                            timeline='Immediate (24-48 hours)',
+                            responsibility='Quality Manager + AI Insights Team',
+                            success_metrics=['Resolve AI-identified critical issue', 'Improve customer feedback sentiment'],
+                            verification_method='AI-powered monitoring of subsequent customer feedback',
+                            target_improvement='Eliminate AI-identified critical issues',
+                            iso_reference='ISO 13485 Section 8.2.2 - Customer Feedback',
+                            regulatory_impact='high',
+                            documentation_required=True
+                        )
+                        ai_capas.append(ai_capa)
+                        capa_counter += 1
+            
+            # Short-term fixes from AI
+            if 'short_term_fixes' in ai_capa_data:
+                for fix in ai_capa_data['short_term_fixes']:
+                    if isinstance(fix, str) and fix.strip():
+                        ai_capa = CAPARecommendation(
+                            capa_id=f"AI-CAPA-{capa_counter:03d}",
+                            priority='High',
+                            category='AI-Identified Quality Improvement',
+                            issue_description=f"AI analysis identified quality improvement opportunity",
+                            root_cause_analysis="AI pattern recognition in customer feedback",
+                            affected_customer_count=0,
+                            customer_impact_assessment="Medium to high impact identified by AI",
+                            representative_reviews=[],
+                            rating_impact="AI-identified rating correlation",
+                            review_volume_trend="AI-analyzed",
+                            corrective_action=fix,
+                            preventive_action="Implement AI-recommended process improvements",
+                            timeline='1-2 weeks',
+                            responsibility='Quality Manager + Product Development',
+                            success_metrics=['Implement AI-recommended fix', 'Monitor customer feedback improvement'],
+                            verification_method='AI-powered trend analysis of customer feedback',
+                            target_improvement='Address AI-identified quality gaps',
+                            iso_reference='ISO 13485 Section 8.5 - Improvement',
+                            regulatory_impact='medium',
+                            documentation_required=True
+                        )
+                        ai_capas.append(ai_capa)
+                        capa_counter += 1
+        
+        # Combine base and AI CAPAs, sort by priority
+        all_capas = base_capas + ai_capas
+        priority_order = {'Critical': 0, 'High': 1, 'Medium': 2, 'Low': 3}
+        all_capas.sort(key=lambda x: priority_order.get(x.priority, 3))
+        
+        return all_capas
+    
+    def _calculate_ai_enhanced_risk(self, category_results: Dict[str, CategoryAnalysis],
+                                  quality_assessment: QualityAssessment,
+                                  ai_insights: Dict[str, Any]) -> Tuple[str, float, List[str]]:
+        """Calculate risk level enhanced with AI insights"""
+        
+        # Start with base risk calculation
+        risk_level, risk_score, risk_factors = self._calculate_base_risk(category_results, quality_assessment)
+        
+        # Enhance with AI risk assessment
+        if ai_insights and 'risk_assessment' in ai_insights:
+            ai_risk = ai_insights['risk_assessment']
+            
+            # Critical issues from AI
+            if 'critical_issues' in ai_risk:
+                critical_items = ai_risk['critical_issues']
+                if isinstance(critical_items, list) and len(critical_items) > 0:
+                    risk_score += len(critical_items) * 10  # High weight for AI-identified critical issues
+                    risk_factors.extend([f"AI-identified critical issue: {item}" for item in critical_items[:3]])
+            
+            # High priority issues from AI
+            if 'high_priority' in ai_risk:
+                high_items = ai_risk['high_priority']
+                if isinstance(high_items, list) and len(high_items) > 0:
+                    risk_score += len(high_items) * 5
+                    risk_factors.extend([f"AI-identified high priority: {item}" for item in high_items[:2]])
+        
+        # AI medical device specific risks
+        if ai_insights and 'medical_device_insights' in ai_insights:
+            medical_insights = ai_insights['medical_device_insights']
+            
+            # User safety profile risks
+            if 'user_safety_profile' in medical_insights:
+                safety_items = medical_insights['user_safety_profile']
+                if isinstance(safety_items, list) and len(safety_items) > 0:
+                    risk_score += len(safety_items) * 15  # Very high weight for safety
+                    risk_factors.append(f"AI-identified safety concerns affecting {len(safety_items)} areas")
+        
+        # Recalculate risk level based on AI-enhanced score
+        if risk_score >= 50:
+            risk_level = RiskLevel.CRITICAL.value
+        elif risk_score >= 30:
+            risk_level = RiskLevel.HIGH.value
+        elif risk_score >= 15:
+            risk_level = RiskLevel.MEDIUM.value
+        elif risk_score >= 5:
+            risk_level = RiskLevel.LOW.value
+        else:
+            risk_level = RiskLevel.MINIMAL.value
+        
+        return risk_level, round(risk_score, 1), risk_factors[:10]  # Limit to top 10 risk factors
+    
+    def _generate_ai_enhanced_insights(self, category_results: Dict[str, CategoryAnalysis],
+                                     quality_assessment: QualityAssessment, 
+                                     ai_insights: Dict[str, Any],
+                                     review_items: List[ReviewItem]) -> List[str]:
+        """Generate insights enhanced with AI analysis"""
+        
+        insights = []
+        
+        # AI-specific insights first
+        if ai_insights:
+            # AI sentiment insights
+            if 'sentiment_analysis' in ai_insights:
+                ai_sentiment = ai_insights['sentiment_analysis']
+                if 'overall_sentiment' in ai_sentiment:
+                    sentiment_text = ai_sentiment['overall_sentiment']
+                    insights.append(f"AI Analysis: {sentiment_text}")
+            
+            # AI medical device insights
+            if 'medical_device_insights' in ai_insights:
+                medical_insights = ai_insights['medical_device_insights']
+                
+                if 'therapeutic_effectiveness' in medical_insights:
+                    effectiveness = medical_insights['therapeutic_effectiveness']
+                    if isinstance(effectiveness, list) and len(effectiveness) > 0:
+                        insights.append(f"AI Medical Assessment: {effectiveness[0]}")
+                
+                if 'patient_compliance_factors' in medical_insights:
+                    compliance = medical_insights['patient_compliance_factors']
+                    if isinstance(compliance, list) and len(compliance) > 0:
+                        insights.append(f"AI Compliance Analysis: {compliance[0]}")
+            
+            # AI actionable insights
+            if 'actionable_insights' in ai_insights:
+                actionable = ai_insights['actionable_insights']
+                
+                if 'listing_optimization' in actionable:
+                    listing_opts = actionable['listing_optimization']
+                    if isinstance(listing_opts, list) and len(listing_opts) > 0:
+                        insights.append(f"AI Listing Recommendation: {listing_opts[0]}")
+                
+                if 'product_improvements' in actionable:
+                    improvements = actionable['product_improvements']
+                    if isinstance(improvements, list) and len(improvements) > 0:
+                        insights.append(f"AI Product Improvement: {improvements[0]}")
+        
+        # Traditional insights (enhanced)
+        traditional_insights = self._generate_traditional_insights(category_results, quality_assessment, review_items)
+        insights.extend(traditional_insights[:3])  # Limit traditional insights
+        
+        return insights[:8]  # Return top 8 insights
     
     def _assess_rating_impact(self, analysis: CategoryAnalysis) -> str:
         """Assess how category issues impact star ratings"""
@@ -1461,9 +2060,10 @@ class TextAnalysisEngine:
             documentation_required=True
         )
 
-# Export the main enhanced classes
+# Export the main enhanced classes with AI integration
 __all__ = [
     'TextAnalysisEngine',
+    'AIEnhancedAnalyzer',
     'ReviewItem', 
     'CategoryAnalysis',
     'QualityAssessment',
