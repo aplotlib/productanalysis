@@ -595,7 +595,7 @@ class ImageDocumentProcessor:
     @staticmethod
     def process_pdf_file(file_data: bytes, filename: str, content_type: str,
                         asin: Optional[str] = None) -> Dict[str, Any]:
-        """Process PDF file with OCR"""
+        """Process PDF file with OCR or AI Vision fallback"""
         result = {
             'success': False,
             'filename': filename,
@@ -612,34 +612,231 @@ class ImageDocumentProcessor:
             FileProcessor.validate_file_size(file_data)
             FileProcessor.validate_file_format(filename, SUPPORTED_DOC_FORMATS)
             
-            # Convert PDF to images and process with OCR
-            if MODULES_AVAILABLE['pdf2image'] and MODULES_AVAILABLE['pytesseract']:
+            # Try PDF OCR only if all required modules are available
+            ocr_success = False
+            if (MODULES_AVAILABLE['pdf2image'] and 
+                MODULES_AVAILABLE['pytesseract'] and 
+                MODULES_AVAILABLE['pillow']):
                 try:
                     text = ImageDocumentProcessor._process_pdf_with_ocr(file_data)
-                    if text:
+                    if text and len(text.strip()) > 10:
                         result.update({
                             'success': True,
                             'text': text,
                             'processing_method': 'PDF OCR'
                         })
-                        
-                        # Extract structured data
-                        structured_data = ImageDocumentProcessor._extract_structured_data(text, content_type)
-                        if structured_data:
-                            result['structured_data'] = structured_data
-                        
-                        return result
+                        ocr_success = True
                 except Exception as e:
                     logger.warning(f"PDF OCR processing failed: {str(e)}")
                     result['errors'].append(f"PDF OCR failed: {str(e)}")
+            else:
+                # OCR modules not available, skip OCR attempt
+                result['errors'].append("PDF OCR modules not available in cloud environment")
             
-            result['errors'].append("PDF processing modules not available")
+            # Use AI Vision for PDF if OCR failed or unavailable
+            if not ocr_success:
+                logger.info(f"Falling back to AI Vision for PDF: {filename}")
+                
+                # For PDFs, we'll treat them as images and let AI Vision handle them
+                ai_vision_result = ImageDocumentProcessor._process_pdf_with_ai_vision(
+                    file_data, filename, content_type
+                )
+                
+                if ai_vision_result['success']:
+                    result.update({
+                        'success': True,
+                        'text': ai_vision_result['text'],
+                        'processing_method': 'AI Vision (PDF)',
+                        'structured_data': ai_vision_result.get('structured_data')
+                    })
+                else:
+                    result['errors'].extend(ai_vision_result.get('errors', []))
+            
+            # Extract structured data if we have text
+            if result['success'] and result['text']:
+                if not result.get('structured_data'):
+                    structured_data = ImageDocumentProcessor._extract_structured_data(
+                        result['text'], content_type
+                    )
+                    if structured_data:
+                        result['structured_data'] = structured_data
+            
             return result
             
         except Exception as e:
             logger.error(f"Error processing PDF {filename}: {str(e)}")
             result['errors'].append(str(e))
             return result
+    
+    @staticmethod
+    def _process_pdf_with_ai_vision(file_data: bytes, filename: str, content_type: str) -> Dict[str, Any]:
+        """Process PDF using AI Vision API directly"""
+        
+        try:
+            # Get API key
+            api_key = None
+            try:
+                import streamlit as st
+                if hasattr(st, 'secrets') and 'openai_api_key' in st.secrets:
+                    api_key = st.secrets['openai_api_key']
+            except:
+                pass
+            
+            if not api_key:
+                import os
+                api_key = os.environ.get('OPENAI_API_KEY')
+            
+            if not api_key:
+                return {
+                    'success': False,
+                    'errors': ['OpenAI API key not configured for PDF processing'],
+                    'text': 'AI Vision PDF analysis requires API key configuration'
+                }
+            
+            # Encode PDF to base64 for AI Vision
+            import base64
+            base64_pdf = base64.b64encode(file_data).decode('utf-8')
+            
+            # Create PDF-specific prompt
+            if content_type == "Product Reviews":
+                prompt = """Analyze this PDF document containing Amazon product review data and extract:
+
+1. ASIN (Amazon product identifier - format B0XXXXXXXXX)
+2. Product name and details
+3. All customer reviews with star ratings and review text
+4. Overall product statistics (average rating, total reviews)
+5. Product price and other details if visible
+
+Please provide a comprehensive analysis in this format:
+ASIN: [detected ASIN or "Not found"]
+PRODUCT_NAME: [full product title]
+OVERALL_RATING: [X.X out of 5 stars]
+TOTAL_REVIEWS: [number of reviews]
+
+REVIEWS:
+[For each review found:]
+RATING: [X] stars
+REVIEW: [exact review text]
+
+QUANTITATIVE_ANALYSIS:
+- Rating Distribution: [breakdown by star rating]
+- Common Themes: [categorize reviews into themes]
+- Sentiment Analysis: [overall positive/negative patterns]
+
+Provide specific insights and recommendations based on the review patterns found."""
+                
+            elif content_type == "Return Reports":
+                prompt = """Analyze this PDF document containing Amazon return report data and extract:
+
+1. ASIN (Amazon product identifier)
+2. Product information
+3. All return reasons and quantities
+4. Return patterns and categories
+5. Timeframes and return trends if visible
+
+Format your response as:
+ASIN: [detected ASIN or "Not found"]
+PRODUCT_NAME: [product name]
+TOTAL_RETURNS: [number if visible]
+
+RETURN_REASONS:
+[List each return reason found]
+
+CATEGORIZED_ANALYSIS:
+- Size/Fit Issues: [count and percentage]
+- Quality/Defect Issues: [count and percentage]
+- Functionality Issues: [count and percentage]
+- Shipping/Packaging Issues: [count and percentage]
+- Customer Expectation Issues: [count and percentage]
+
+RECOMMENDATIONS:
+[Specific actionable recommendations to reduce returns]
+
+Provide quantitative analysis with percentages and patterns."""
+                
+            else:  # General PDF analysis
+                prompt = f"""Analyze this PDF document related to Amazon {content_type.lower()} and extract all relevant product information, data, and insights. Focus on:
+
+1. Product identifiers (ASINs)
+2. Performance metrics and data
+3. Customer feedback and patterns
+4. Actionable business insights
+5. Quantitative analysis where possible
+
+Provide structured analysis with specific recommendations."""
+            
+            # Make API call to GPT-4o
+            import requests
+            import json
+            
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}"
+            }
+            
+            # Note: GPT-4o can process PDFs directly
+            payload = {
+                "model": "gpt-4o",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": prompt
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:application/pdf;base64,{base64_pdf}",
+                                    "detail": "high"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                "max_tokens": 2500,
+                "temperature": 0.1
+            }
+            
+            response = requests.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers=headers,
+                data=json.dumps(payload),
+                timeout=60  # Longer timeout for PDF processing
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                ai_response = result['choices'][0]['message']['content']
+                
+                # Parse the structured response
+                structured_data = ImageDocumentProcessor._parse_ai_vision_response(
+                    ai_response, content_type
+                )
+                
+                return {
+                    'success': True,
+                    'text': ai_response,
+                    'structured_data': structured_data,
+                    'processing_method': 'AI Vision (PDF)'
+                }
+            else:
+                error_msg = f"AI Vision PDF processing error: {response.status_code}"
+                logger.error(f"{error_msg}: {response.text}")
+                return {
+                    'success': False,
+                    'errors': [error_msg],
+                    'text': f'PDF analysis failed: {error_msg}'
+                }
+                
+        except Exception as e:
+            logger.error(f"AI Vision PDF processing error: {str(e)}")
+            return {
+                'success': False,
+                'errors': [str(e)],
+                'text': f'PDF processing failed: {str(e)}'
+            }
     
     @staticmethod
     def _process_with_ocr(image_data: bytes) -> str:
