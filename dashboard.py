@@ -1135,6 +1135,16 @@ EXTRACTED CONTENT:
                         for driver in component_score.key_drivers:
                             st.markdown(f"• {driver}")
     
+    def render_ai_chat_tab(self):
+        """Render AI chat tab with embedded chat interface"""
+        try:
+            from ai_chat import AIChatInterface
+            chat_interface = AIChatInterface()
+            chat_interface.render_chat_interface()
+        except ImportError:
+            st.error("AI Chat module not available. Please ensure ai_chat.py is in your project directory.")
+            st.info("The AI Chat feature provides standalone consulting without requiring data uploads.")
+    
     def render_image_analysis_tab(self):
         """Render dedicated tab for image analysis results and management"""
         
