@@ -128,8 +128,11 @@ def calculate_rating_trends(reviews_df):
             'parsed_date': 'first'
         }).reset_index()
         
-        monthly_ratings.columns = ['year_month', 'avg_rating', 'review_count', 'date']
+        monthly_ratings.columns = ['year_month', 'avg_rating', 'review_count', 'first_date']
         monthly_ratings['avg_rating'] = monthly_ratings['avg_rating'].round(2)
+        
+        # Convert first_date to datetime for proper handling
+        monthly_ratings['date'] = pd.to_datetime(monthly_ratings['first_date'])
         
         # Calculate overall trend
         if len(monthly_ratings) >= 2:
@@ -640,9 +643,23 @@ def display_rating_trends(trends_data):
         if len(monthly_data) > 0:
             st.markdown("**Monthly Rating Breakdown:**")
             
-            # Format for display
+            # Format for display - fix the datetime issue
             display_data = monthly_data.copy()
-            display_data['Month'] = display_data['date'].dt.strftime('%B %Y')
+            
+            # Safely format dates
+            try:
+                if 'date' in display_data.columns:
+                    # Make sure date column is datetime
+                    display_data['date'] = pd.to_datetime(display_data['date'])
+                    display_data['Month'] = display_data['date'].dt.strftime('%B %Y')
+                else:
+                    # Fallback to year_month if date column is missing
+                    display_data['Month'] = display_data['year_month']
+            except Exception as e:
+                # If datetime formatting fails, use year_month as fallback
+                logger.warning(f"Date formatting error: {str(e)}")
+                display_data['Month'] = display_data['year_month']
+            
             display_data['Average Rating'] = display_data['avg_rating']
             display_data['Review Count'] = display_data['review_count']
             
