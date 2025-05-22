@@ -1516,6 +1516,12 @@ class ProfessionalDashboard:
     def render_main_dashboard(self):
         """Render the main dashboard with comprehensive error handling"""
         try:
+            # Apply theme first (safely)
+            try:
+                self.ui.set_professional_theme()
+            except Exception as e:
+                logger.warning(f"Theme application failed: {str(e)}")
+            
             # Store reference to app controller for upload handling
             if hasattr(st.session_state, 'app_controller'):
                 st.session_state.app_controller = st.session_state.app_controller
