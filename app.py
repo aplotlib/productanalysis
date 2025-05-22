@@ -35,7 +35,7 @@ def safe_import(module_name):
 # Import your custom modules
 enhanced_ai_analysis, ai_available = safe_import('enhanced_ai_analysis')
 upload_handler, upload_available = safe_import('upload_handler')
-ai_chat, chat_available = safe_import('ai_chat')
+# Note: Removed ai_chat dependency - using built-in chat functionality
 
 # Application configuration
 APP_CONFIG = {
@@ -60,7 +60,7 @@ def initialize_session_state():
         'show_chat': False,
         'current_listing_title': '',
         'current_listing_description': '',
-        'chat_session': None,
+        'chat_messages': [],  # Built-in chat messages
         'selected_date_range': None,
         'filtered_data': None,
         'rating_trends': None
@@ -225,14 +225,10 @@ def display_ai_status():
                 """)
 
 def display_ai_chat():
-    """Display AI chat interface"""
+    """Display AI chat interface with fallback functionality"""
     if not st.session_state.show_chat:
         return
     
-    if not chat_available:
-        st.error("❌ AI Chat module not available")
-        return
-        
     with st.expander("💬 AI Listing Optimization Chat", expanded=True):
         col1, col2 = st.columns([5, 1])
         
@@ -244,81 +240,180 @@ def display_ai_chat():
         with col1:
             st.markdown("**Ask questions about listing optimization, get advice, or discuss your analysis results**")
         
-        # Initialize chat session if needed
-        if st.session_state.chat_session is None and chat_available:
-            try:
-                st.session_state.chat_session = ai_chat.ChatSession('listing_optimizer')
-            except Exception as e:
-                st.error(f"Failed to initialize chat: {str(e)}")
-                return
+        # Check if we have AI available first
+        ai_status = check_ai_status()
+        if not ai_status.get('available'):
+            st.error("❌ AI Chat requires OpenAI API configuration")
+            st.info("Configure your OpenAI API key to enable chat functionality")
+            return
         
-        # Add context about current analysis to chat
-        if st.session_state.analysis_results and st.session_state.chat_session:
-            # Prepare context message for the AI
-            context_info = []
+        # Initialize chat messages if not exists
+        if 'chat_messages' not in st.session_state:
+            st.session_state.chat_messages = []
+        
+        # Add initial context if we have analysis results
+        if st.session_state.analysis_results and len(st.session_state.chat_messages) == 0:
             results = st.session_state.analysis_results
+            context_message = "I can see you've completed a review analysis. "
             
             if results.get('review_categories'):
                 categories = results['review_categories']
-                top_issues = sorted(categories.items(), key=lambda x: x[1]['count'], reverse=True)[:3]
-                context_info.append("Current Analysis Context:")
-                context_info.append(f"- Total reviews analyzed: {results.get('reviews_analyzed', 0)}")
-                for category_key, category_data in top_issues:
-                    category_name = category_key.replace('_', ' ').title()
-                    context_info.append(f"- {category_name}: {category_data['count']} reviews")
+                high_priority = [k for k, v in categories.items() if v.get('priority') == 'H']
+                if high_priority:
+                    context_message += f"I found {len(high_priority)} critical issues that need attention. "
+                context_message += f"Total of {results.get('reviews_analyzed', 0)} reviews analyzed. "
             
-            if context_info and len(st.session_state.chat_session.messages) == 0:
-                # Add initial context message
-                context_message = "\n".join(context_info)
-                st.session_state.chat_session.add_assistant_message(
-                    f"I can see you've just completed an analysis. Here's what I found:\n\n{context_message}\n\nHow can I help you interpret these results or improve your listing?"
-                )
+            context_message += "How can I help you optimize your listing based on these insights?"
+            
+            st.session_state.chat_messages.append({
+                'role': 'assistant',
+                'content': context_message
+            })
         
-        # Chat interface
-        if st.session_state.chat_session:
-            # Display chat history
-            chat_container = st.container()
+        # Display chat history
+        chat_container = st.container()
+        
+        with chat_container:
+            if not st.session_state.chat_messages:
+                st.info("👋 Hi! I'm your Amazon listing optimization expert. Ask me anything about improving your listings!")
+            else:
+                # Display conversation
+                for message in st.session_state.chat_messages[-10:]:  # Show last 10 messages
+                    role = message['role']
+                    content = message['content']
+                    
+                    if role == 'user':
+                        with st.chat_message("user"):
+                            st.markdown(content)
+                    else:
+                        with st.chat_message("assistant"):
+                            st.markdown(content)
+        
+        # Chat input
+        user_input = st.chat_input("Ask about listing optimization...")
+        
+        if user_input:
+            # Add user message to history
+            st.session_state.chat_messages.append({
+                'role': 'user',
+                'content': user_input
+            })
             
-            with chat_container:
-                if not st.session_state.chat_session.messages:
-                    st.info("👋 Hi! I'm your Amazon listing optimization expert. Ask me anything about improving your listings!")
-                else:
-                    # Display conversation
-                    for message in st.session_state.chat_session.messages[-10:]:  # Show last 10 messages
-                        role = message['role']
-                        content = message['content']
-                        
-                        if role == 'user':
-                            with st.chat_message("user"):
-                                st.markdown(content)
-                        else:
-                            with st.chat_message("assistant"):
-                                st.markdown(content)
+            # Display user message immediately
+            with st.chat_message("user"):
+                st.markdown(user_input)
             
-            # Chat input
-            user_input = st.chat_input("Ask about listing optimization...")
+            # Prepare context for AI
+            context_messages = []
             
-            if user_input:
-                # Add context about current analysis if available
+            # Add system message
+            system_prompt = """You are an expert Amazon listing optimization specialist with 10+ years of experience. 
+            
+            Your expertise includes:
+            - Amazon SEO and keyword research
+            - Product title and bullet point optimization  
+            - A+ Content and Enhanced Brand Content strategy
+            - Image optimization and visual storytelling
+            - Conversion rate optimization
+            - Competitor analysis and positioning
+            - Customer review analysis and reputation management
+            
+            Provide specific, actionable advice with concrete examples. Be conversational but professional."""
+            
+            context_messages.append({"role": "system", "content": system_prompt})
+            
+            # Add analysis context if available
+            if st.session_state.analysis_results:
+                results = st.session_state.analysis_results
+                analysis_context = f"Current analysis context: Analyzed {results.get('reviews_analyzed', 0)} reviews. "
+                
+                if results.get('review_categories'):
+                    categories = results['review_categories']
+                    top_issues = sorted(categories.items(), key=lambda x: x[1]['count'], reverse=True)[:3]
+                    analysis_context += "Top issues: "
+                    for category_key, data in top_issues:
+                        category_name = category_key.replace('_', ' ').title()
+                        analysis_context += f"{category_name} ({data['count']} reviews), "
+                
+                enhanced_message = f"{analysis_context}\n\nUser question: {user_input}"
+            else:
                 enhanced_message = user_input
-                if st.session_state.analysis_results:
-                    enhanced_message = f"Based on my current review analysis, {user_input}"
-                
-                # Display user message immediately
-                with st.chat_message("user"):
-                    st.markdown(user_input)
-                
-                # Get AI response
-                with st.chat_message("assistant"):
-                    with st.spinner("Thinking..."):
-                        try:
-                            response = st.session_state.chat_session.send_message(enhanced_message)
+            
+            # Add recent conversation history
+            recent_messages = st.session_state.chat_messages[-6:]  # Last 6 messages for context
+            for msg in recent_messages[:-1]:  # Exclude the current user message
+                context_messages.append({
+                    "role": msg['role'],
+                    "content": msg['content']
+                })
+            
+            # Add current enhanced message
+            context_messages.append({
+                "role": "user", 
+                "content": enhanced_message
+            })
+            
+            # Get AI response
+            with st.chat_message("assistant"):
+                with st.spinner("Thinking..."):
+                    try:
+                        response_result = st.session_state.ai_analyzer.api_client.call_api(
+                            context_messages,
+                            temperature=0.7,
+                            max_tokens=800
+                        )
+                        
+                        if response_result['success']:
+                            response = response_result['result']
                             st.markdown(response)
-                        except Exception as e:
-                            st.error(f"Chat error: {str(e)}")
-                            st.markdown("I'm having trouble right now. Please check your API configuration.")
-                
-                st.rerun()
+                            
+                            # Add to chat history
+                            st.session_state.chat_messages.append({
+                                'role': 'assistant',
+                                'content': response
+                            })
+                        else:
+                            error_msg = f"I'm having trouble right now: {response_result.get('error', 'Unknown error')}"
+                            st.error(error_msg)
+                            st.session_state.chat_messages.append({
+                                'role': 'assistant',
+                                'content': error_msg
+                            })
+                            
+                    except Exception as e:
+                        error_msg = f"Chat error: {str(e)}"
+                        st.error(error_msg)
+                        st.session_state.chat_messages.append({
+                            'role': 'assistant',
+                            'content': "I'm experiencing technical difficulties. Please check your API configuration and try again."
+                        })
+            
+            st.rerun()
+        
+        # Chat controls
+        if len(st.session_state.chat_messages) > 0:
+            st.markdown("---")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if st.button("🗑️ Clear Chat History"):
+                    st.session_state.chat_messages = []
+                    st.rerun()
+            
+            with col2:
+                # Export chat functionality
+                if st.button("📥 Export Chat"):
+                    chat_export = "# Amazon Listing Optimization Chat\n\n"
+                    for msg in st.session_state.chat_messages:
+                        role_name = "You" if msg['role'] == 'user' else "AI Assistant"
+                        chat_export += f"**{role_name}:** {msg['content']}\n\n"
+                    
+                    st.download_button(
+                        label="Download Chat",
+                        data=chat_export,
+                        file_name=f"listing_chat_{datetime.now().strftime('%Y%m%d_%H%M')}.md",
+                        mime="text/markdown"
+                    )
 
 def load_example_data():
     """Load example data for demonstration"""
@@ -1773,6 +1868,25 @@ def main():
             with col2:
                 if st.button("💬 Discuss Results", use_container_width=True):
                     st.session_state.show_chat = True
+                    # Add initial context about results
+                    if 'chat_messages' not in st.session_state:
+                        st.session_state.chat_messages = []
+                    
+                    # Add analysis summary if not already present
+                    if len(st.session_state.chat_messages) == 0:
+                        results = st.session_state.analysis_results
+                        summary = "I've completed your review analysis! "
+                        if results.get('review_categories'):
+                            categories = results['review_categories']
+                            high_priority = [k for k, v in categories.items() if v.get('priority') == 'H']
+                            if high_priority:
+                                summary += f"Found {len(high_priority)} critical issues that need immediate attention. "
+                        summary += "What would you like to discuss about optimizing your listing?"
+                        
+                        st.session_state.chat_messages.append({
+                            'role': 'assistant',
+                            'content': summary
+                        })
                     st.rerun()
             
             with col3:
@@ -1842,6 +1956,13 @@ def display_modern_sidebar():
             if st.button("💬 Launch AI Chat", use_container_width=True):
                 st.session_state.show_chat = True
                 st.rerun()
+                
+            # Show current chat status
+            if st.session_state.show_chat:
+                st.success("💬 Chat Active")
+            else:
+                st.info("💬 Chat Available")
+                
         else:
             st.markdown("""
             <div style="background: linear-gradient(90deg, #f093fb 0%, #f5576c 100%); 
@@ -1869,6 +1990,15 @@ def display_modern_sidebar():
                 
                 3. **Restart the application**
                 """)
+            
+            st.warning("💬 Chat Unavailable - Need API Key")
+        
+        # Debug info
+        with st.expander("🔍 Debug Info"):
+            st.write("Chat Status:", st.session_state.get('show_chat', False))
+            st.write("AI Available:", status.get('available', False))
+            if 'chat_messages' in st.session_state:
+                st.write("Chat Messages:", len(st.session_state.chat_messages))
         
         # Modern app info
         st.markdown("---")
@@ -1884,6 +2014,20 @@ def display_modern_sidebar():
         
         for feature in features:
             st.markdown(f"• {feature}")
+        
+        # Chat controls in sidebar when active
+        if st.session_state.get('show_chat', False):
+            st.markdown("---")
+            st.markdown("### 💬 Chat Controls")
+            
+            if st.button("❌ Close Chat"):
+                st.session_state.show_chat = False
+                st.rerun()
+            
+            if 'chat_messages' in st.session_state and len(st.session_state.chat_messages) > 0:
+                if st.button("🗑️ Clear Messages"):
+                    st.session_state.chat_messages = []
+                    st.rerun()
 
 def handle_modern_file_upload():
     """Modern file upload interface"""
