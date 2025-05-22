@@ -693,16 +693,138 @@ class ImageDocumentProcessor:
     def _extract_structured_data(text: str, content_type: str) -> Optional[Dict[str, Any]]:
         """Extract structured data from OCR text based on content type"""
         try:
+            result = {}
+            
+            # Always try to extract ASINs and product info first
+            asins = ImageDocumentProcessor._extract_asins(text)
+            product_info = ImageDocumentProcessor._extract_product_info(text)
+            
+            if asins:
+                result['detected_asins'] = asins
+                result['primary_asin'] = asins[0]  # Use first detected ASIN as primary
+            
+            if product_info:
+                result['product_info'] = product_info
+            
+            # Then extract content-specific data
             if content_type == "Product Reviews":
-                return ImageDocumentProcessor._extract_reviews_from_text(text)
+                reviews = ImageDocumentProcessor._extract_reviews_from_text(text)
+                result.update(reviews)
             elif content_type == "Return Reports":
-                return ImageDocumentProcessor._extract_returns_from_text(text)
+                returns = ImageDocumentProcessor._extract_returns_from_text(text)
+                result.update(returns)
             elif content_type == "Product Listing":
-                return ImageDocumentProcessor._extract_listing_from_text(text)
-            return None
+                listing = ImageDocumentProcessor._extract_listing_from_text(text)
+                result.update(listing)
+            
+            return result if result else None
+            
         except Exception as e:
             logger.error(f"Error extracting structured data: {str(e)}")
             return None
+    
+    @staticmethod
+    def _extract_asins(text: str) -> List[str]:
+        """Extract Amazon ASINs from text"""
+        # ASIN pattern: B + 9 alphanumeric characters
+        asin_pattern = r'B[0-9A-Z]{9}'
+        asins = re.findall(asin_pattern, text.upper())
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_asins = []
+        for asin in asins:
+            if asin not in seen:
+                seen.add(asin)
+                unique_asins.append(asin)
+        
+        return unique_asins
+    
+    @staticmethod
+    def _extract_product_info(text: str) -> Dict[str, Any]:
+        """Extract product information from text"""
+        product_info = {}
+        
+        # Look for price patterns
+        price_patterns = [
+            r'\$(\d+(?:\.\d{2})?)',  # $29.99
+            r'Price[:\s]*\$(\d+(?:\.\d{2})?)',  # Price: $29.99
+            r'(\d+(?:\.\d{2})?)\s*dollars?'  # 29.99 dollars
+        ]
+        
+        for pattern in price_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            if matches:
+                try:
+                    product_info['detected_price'] = float(matches[0])
+                    break
+                except ValueError:
+                    continue
+        
+        # Look for star ratings
+        rating_patterns = [
+            r'(\d+(?:\.\d+)?)\s*(?:out of|\/)\s*5\s*star',
+            r'(\d+(?:\.\d+)?)\s*star',
+            r'Rating[:\s]*(\d+(?:\.\d+)?)'
+        ]
+        
+        for pattern in rating_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            if matches:
+                try:
+                    rating = float(matches[0])
+                    if 1 <= rating <= 5:
+                        product_info['detected_rating'] = rating
+                        break
+                except ValueError:
+                    continue
+        
+        # Look for review counts
+        review_patterns = [
+            r'(\d+(?:,\d+)*)\s*(?:customer\s*)?reviews?',
+            r'(\d+(?:,\d+)*)\s*ratings?',
+            r'Based on (\d+(?:,\d+)*)\s*reviews?'
+        ]
+        
+        for pattern in review_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            if matches:
+                try:
+                    review_count = int(matches[0].replace(',', ''))
+                    product_info['detected_review_count'] = review_count
+                    break
+                except ValueError:
+                    continue
+        
+        # Look for product titles (usually longer lines near the top)
+        lines = text.split('\n')
+        potential_titles = []
+        
+        for i, line in enumerate(lines[:10]):  # Check first 10 lines
+            line = line.strip()
+            # Skip lines that look like navigation, prices, ratings, etc.
+            if (len(line) > 20 and len(line) < 150 and 
+                not re.search(r'[\$\d+\.\d+]', line) and
+                not re.search(r'\d+\s*star', line, re.IGNORECASE) and
+                not line.lower().startswith(('add to', 'buy now', 'price', 'rating', 'customer'))):
+                potential_titles.append(line)
+        
+        if potential_titles:
+            product_info['detected_title'] = potential_titles[0]
+        
+        # Look for brand names (common medical device brands)
+        medical_brands = [
+            'drive medical', 'vive', 'carex', 'medline', 'invacare', 'lumex', 
+            'graham field', 'nova', 'cardinal health', 'mckesson', 'dmi',
+            'essential medical', 'compass health', 'mobility', 'healthcare'
+        ]
+        
+        for brand in medical_brands:
+            if brand.lower() in text.lower():
+                product_info['detected_brand'] = brand.title()
+                break
+        
+        return product_info
     
     @staticmethod
     def _extract_reviews_from_text(text: str) -> Dict[str, Any]:
