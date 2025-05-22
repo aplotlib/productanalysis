@@ -676,41 +676,46 @@ def display_time_period_comparison(monthly_data):
     """Display comparison between time periods"""
     st.markdown("**📊 Time Period Comparison**")
     
-    # Split data into first half and second half
-    mid_point = len(monthly_data) // 2
-    first_half = monthly_data.iloc[:mid_point]
-    second_half = monthly_data.iloc[mid_point:]
+    try:
+        # Split data into first half and second half
+        mid_point = len(monthly_data) // 2
+        first_half = monthly_data.iloc[:mid_point]
+        second_half = monthly_data.iloc[mid_point:]
+        
+        if len(first_half) > 0 and len(second_half) > 0:
+            first_avg = first_half['avg_rating'].mean()
+            second_avg = second_half['avg_rating'].mean()
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric("Earlier Period Avg", f"{first_avg:.2f}/5")
+            
+            with col2:
+                st.metric("Recent Period Avg", f"{second_avg:.2f}/5")
+            
+            with col3:
+                change = second_avg - first_avg
+                change_direction = "📈" if change > 0 else "📉" if change < 0 else "➡️"
+                st.metric("Change", f"{change_direction} {abs(change):.2f}")
+            
+            # Interpretation
+            if abs(change) >= 0.3:
+                if change > 0:
+                    st.success(f"🎉 **Significant Improvement**: Ratings increased by {change:.2f} stars over time")
+                else:
+                    st.error(f"⚠️ **Declining Trend**: Ratings decreased by {abs(change):.2f} stars over time")
+            elif abs(change) >= 0.1:
+                if change > 0:
+                    st.info(f"📈 **Slight Improvement**: Ratings increased by {change:.2f} stars")
+                else:
+                    st.warning(f"📉 **Slight Decline**: Ratings decreased by {abs(change):.2f} stars")
+            else:
+                st.info("➡️ **Stable Performance**: No significant change in ratings over time")
     
-    if len(first_half) > 0 and len(second_half) > 0:
-        first_avg = first_half['avg_rating'].mean()
-        second_avg = second_half['avg_rating'].mean()
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric("Earlier Period Avg", f"{first_avg:.2f}/5")
-        
-        with col2:
-            st.metric("Recent Period Avg", f"{second_avg:.2f}/5")
-        
-        with col3:
-            change = second_avg - first_avg
-            change_direction = "📈" if change > 0 else "📉" if change < 0 else "➡️"
-            st.metric("Change", f"{change_direction} {abs(change):.2f}")
-        
-        # Interpretation
-        if abs(change) >= 0.3:
-            if change > 0:
-                st.success(f"🎉 **Significant Improvement**: Ratings increased by {change:.2f} stars over time")
-            else:
-                st.error(f"⚠️ **Declining Trend**: Ratings decreased by {abs(change):.2f} stars over time")
-        elif abs(change) >= 0.1:
-            if change > 0:
-                st.info(f"📈 **Slight Improvement**: Ratings increased by {change:.2f} stars")
-            else:
-                st.warning(f"📉 **Slight Decline**: Ratings decreased by {abs(change):.2f} stars")
-        else:
-            st.info("➡️ **Stable Performance**: No significant change in ratings over time")
+    except Exception as e:
+        logger.warning(f"Error in time period comparison: {str(e)}")
+        st.info("Unable to calculate time period comparison")
 
 def display_rating_distribution(reviews, data_label):
     """Display rating distribution"""
@@ -853,114 +858,83 @@ def categorize_all_reviews(all_reviews, product_info, listing_context=""):
     """Categorize ALL reviews into specific complaint/praise categories"""
     try:
         # Create batches for large review sets to avoid token limits
-        batch_size = 100  # Process 100 reviews at a time
+        batch_size = 50  # Reduce batch size for better AI processing
         all_categories = {}
         
         for i in range(0, len(all_reviews), batch_size):
             batch = all_reviews[i:i + batch_size]
             
-            # Prepare batch for analysis
-            batch_text = ""
+            # Prepare batch for analysis - simplified format
+            batch_reviews = []
             for review in batch:
-                batch_text += f"Review {review['id']}: Rating {review['rating']}/5\n"
-                batch_text += f"Title: {review['title']}\n"
-                batch_text += f"Body: {review['body']}\n"
-                batch_text += f"Verified: {review['verified']}\n---\n"
+                review_text = f"Review {review['id']}: [{review['rating']}/5] {review['title']} - {review['body'][:200]}..."
+                batch_reviews.append(review_text)
             
+            # Simplified categorization prompt for better parsing
             categorization_prompt = f"""
-            Categorize these Amazon customer reviews into specific complaint and praise categories.
+            Categorize these Amazon reviews into common issue categories. Return ONLY valid JSON.
             
-            Product ASIN: {product_info.get('asin', 'Unknown')}
-            Batch: Reviews {i+1} to {min(i+batch_size, len(all_reviews))}
-            {listing_context}
+            Product: {product_info.get('asin', 'Unknown')}
+            Reviews {i+1} to {min(i+batch_size, len(all_reviews))}:
             
-            REVIEWS TO CATEGORIZE:
-            {batch_text}
+            {chr(10).join(batch_reviews)}
             
-            Return a JSON object with categories and their details:
+            Return JSON in this exact format (no extra text):
             {{
-                "size_issues": {{
-                    "count": 0,
-                    "reviews": ["Review ID: quote from review"],
-                    "trend": "most common size complaint"
-                }},
-                "quality_issues": {{
-                    "count": 0,
-                    "reviews": ["Review ID: quote from review"],
-                    "trend": "most common quality complaint"
-                }},
-                "noise_issues": {{
-                    "count": 0,
-                    "reviews": ["Review ID: quote from review"],
-                    "trend": "noise-related complaints"
-                }},
-                "fit_issues": {{
-                    "count": 0,
-                    "reviews": ["Review ID: quote from review"],
-                    "trend": "fit/compatibility issues"
-                }},
-                "durability_issues": {{
-                    "count": 0,
-                    "reviews": ["Review ID: quote from review"],
-                    "trend": "durability/longevity complaints"
-                }},
-                "ease_of_use": {{
-                    "count": 0,
-                    "reviews": ["Review ID: quote from review"],
-                    "trend": "usability complaints or praise"
-                }},
-                "value_for_money": {{
-                    "count": 0,
-                    "reviews": ["Review ID: quote from review"],
-                    "trend": "price/value concerns"
-                }},
-                "shipping_packaging": {{
-                    "count": 0,
-                    "reviews": ["Review ID: quote from review"],
-                    "trend": "shipping or packaging issues"
-                }},
-                "customer_service": {{
-                    "count": 0,
-                    "reviews": ["Review ID: quote from review"],
-                    "trend": "customer service experiences"
-                }},
-                "positive_highlights": {{
-                    "count": 0,
-                    "reviews": ["Review ID: quote from review"],
-                    "trend": "most praised features"
-                }}
+                "size_issues": {{"count": 0, "trend": "size complaint summary", "examples": ["quote1"]}},
+                "quality_issues": {{"count": 0, "trend": "quality complaint summary", "examples": ["quote1"]}},
+                "noise_issues": {{"count": 0, "trend": "noise complaint summary", "examples": ["quote1"]}},
+                "fit_issues": {{"count": 0, "trend": "fit complaint summary", "examples": ["quote1"]}},
+                "durability_issues": {{"count": 0, "trend": "durability complaint summary", "examples": ["quote1"]}},
+                "ease_of_use": {{"count": 0, "trend": "usability feedback", "examples": ["quote1"]}},
+                "value_issues": {{"count": 0, "trend": "price/value concerns", "examples": ["quote1"]}},
+                "positive_highlights": {{"count": 0, "trend": "most praised features", "examples": ["quote1"]}}
             }}
             
-            Only include categories that have actual reviews. Set count to 0 for categories with no relevant reviews.
+            Only include categories with count > 0. Set count to actual number of matching reviews.
             """
             
             # Call AI for this batch
             batch_result = st.session_state.ai_analyzer.api_client.call_api([
-                {"role": "system", "content": "You are an expert at categorizing customer feedback into actionable categories for listing optimization."},
+                {"role": "system", "content": "You are a review categorization expert. Return only valid JSON with no additional text or explanations."},
                 {"role": "user", "content": categorization_prompt}
-            ])
+            ], max_tokens=800)
             
             if batch_result['success']:
                 try:
-                    batch_categories = json.loads(batch_result['result'])
+                    # Clean the response to ensure it's valid JSON
+                    response_text = batch_result['result'].strip()
                     
-                    # Merge batch results with overall results
-                    for category, data in batch_categories.items():
-                        if category not in all_categories:
-                            all_categories[category] = {
-                                'count': 0,
-                                'reviews': [],
-                                'trend': ''
-                            }
+                    # Remove any text before the first { or after the last }
+                    start_idx = response_text.find('{')
+                    end_idx = response_text.rfind('}')
+                    
+                    if start_idx != -1 and end_idx != -1:
+                        json_text = response_text[start_idx:end_idx + 1]
+                        batch_categories = json.loads(json_text)
                         
-                        all_categories[category]['count'] += data.get('count', 0)
-                        all_categories[category]['reviews'].extend(data.get('reviews', []))
-                        if data.get('trend') and data['count'] > 0:
-                            all_categories[category]['trend'] = data['trend']
+                        # Merge batch results with overall results
+                        for category, data in batch_categories.items():
+                            if category not in all_categories:
+                                all_categories[category] = {
+                                    'count': 0,
+                                    'reviews': [],
+                                    'trend': ''
+                                }
+                            
+                            all_categories[category]['count'] += data.get('count', 0)
+                            all_categories[category]['reviews'].extend(data.get('examples', []))
+                            if data.get('trend') and data['count'] > 0:
+                                all_categories[category]['trend'] = data['trend']
+                    else:
+                        st.warning(f"Invalid JSON structure in batch {i//batch_size + 1}")
+                        continue
                 
-                except json.JSONDecodeError:
-                    st.warning(f"Could not parse categorization for batch {i//batch_size + 1}")
+                except json.JSONDecodeError as e:
+                    st.warning(f"Could not parse categorization for batch {i//batch_size + 1}: {str(e)}")
                     continue
+            else:
+                st.warning(f"AI call failed for batch {i//batch_size + 1}")
             
             # Update progress
             progress = min(i + batch_size, len(all_reviews))
@@ -979,7 +953,8 @@ def categorize_all_reviews(all_reviews, product_info, listing_context=""):
         logger.error(f"Categorization error: {str(e)}")
         return {
             'success': False,
-            'error': str(e)
+            'error': str(e),
+            'categories': {}
         }
 
 def run_basic_analysis():
@@ -1106,82 +1081,233 @@ def display_comprehensive_ai_results(results):
         else:
             st.json(ai_analysis)
 
-def display_review_categories(categories):
-    """Display categorized review analysis"""
-    st.markdown("### 📊 Review Categories Analysis")
-    st.markdown("**Customer feedback organized by common themes and issues**")
+def display_modern_date_filtering(data):
+    """Modern date filtering interface"""
+    date_range = data['date_range']
     
-    # Create tabs for different category types
-    tab1, tab2 = st.tabs(["🔴 Issues & Complaints", "🟢 Positive Feedback"])
+    with st.expander("📅 Time Period Analysis", expanded=False):
+        st.markdown("""
+        <div style="background: #f8f9fa; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
+            <h4>📅 Focus Your Analysis</h4>
+            <p>Analyze specific time periods to understand performance changes and trends</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        col1, col2, col3 = st.columns([2, 2, 1])
+        
+        with col1:
+            start_date = st.date_input(
+                "Start Date",
+                value=date_range['earliest'],
+                min_value=date_range['earliest'],
+                max_value=date_range['latest']
+            )
+        
+        with col2:
+            end_date = st.date_input(
+                "End Date", 
+                value=date_range['latest'],
+                min_value=date_range['earliest'],
+                max_value=date_range['latest']
+            )
+        
+        with col3:
+            st.markdown("<br>", unsafe_allow_html=True)  # Spacing
+            if st.button("🔍 Apply Filter", use_container_width=True):
+                # Filter reviews by date range
+                filtered_reviews = []
+                for review in data['reviews']:
+                    if review.get('parsed_date'):
+                        if start_date <= review['parsed_date'] <= end_date:
+                            filtered_reviews.append(review)
+                
+                st.session_state.filtered_data = filtered_reviews
+                st.session_state.selected_date_range = {
+                    'start': start_date,
+                    'end': end_date
+                }
+                
+                st.markdown(f"""
+                <div class="success-banner">
+                    <h4>✅ Filter Applied</h4>
+                    <p>Now analyzing {len(filtered_reviews)} reviews from {start_date} to {end_date}</p>
+                </div>
+                """, unsafe_allow_html=True)
+                st.rerun()
+        
+        if st.session_state.filtered_data:
+            st.markdown("---")
+            col1, col2 = st.columns([3, 1])
+            
+            with col1:
+                filter_info = st.session_state.selected_date_range
+                st.info(f"📅 **Active Filter**: {filter_info['start']} to {filter_info['end']} ({len(st.session_state.filtered_data)} reviews)")
+            
+            with col2:
+                if st.button("🔄 Clear Filter", use_container_width=True):
+                    st.session_state.filtered_data = None
+                    st.session_state.selected_date_range = None
+                    st.rerun()
+
+def display_modern_rating_distribution(reviews, data_label):
+    """Modern rating distribution display"""
+    st.markdown(f"### ⭐ {data_label} Rating Breakdown")
+    
+    ratings = [r['rating'] for r in reviews if r['rating']]
+    
+    if ratings:
+        rating_counts = {}
+        for rating in ratings:
+            rating_counts[rating] = rating_counts.get(rating, 0) + 1
+        
+        # Create modern visual rating distribution
+        cols = st.columns(5)
+        for i, (rating, count) in enumerate(sorted(rating_counts.items(), reverse=True)):
+            with cols[i % 5]:
+                percentage = (count / len(ratings)) * 100
+                color = "#4CAF50" if rating >= 4 else "#FF9800" if rating >= 3 else "#F44336"
+                
+                st.markdown(f"""
+                <div style="background: {color}; padding: 1rem; border-radius: 8px; 
+                           color: white; text-align: center; margin-bottom: 1rem;">
+                    <h3>{rating} ⭐</h3>
+                    <h4>{count} reviews</h4>
+                    <p>{percentage:.1f}%</p>
+                </div>
+                """, unsafe_allow_html=True)
+        
+        # Data table for detailed view
+        with st.expander("📊 Detailed Breakdown"):
+            rating_df = pd.DataFrame([
+                {
+                    'Rating': f"{k} ⭐", 
+                    'Count': v, 
+                    'Percentage': f"{(v/len(ratings))*100:.1f}%",
+                    'Bar': '█' * int((v/max(rating_counts.values()))*20)
+                }
+                for k, v in sorted(rating_counts.items(), reverse=True)
+            ])
+            
+            st.dataframe(rating_df, use_container_width=True, hide_index=True)
+
+def display_review_categories(categories):
+    """Enhanced modern review categories display"""
+    st.markdown("""
+    <div style="background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); 
+                padding: 1.5rem; border-radius: 10px; color: white; margin: 2rem 0;">
+        <h3>📊 AI Review Categorization</h3>
+        <p>Customer feedback organized by themes and actionable insights</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Create modern tabs
+    tab1, tab2 = st.tabs(["🔴 Issues & Opportunities", "🟢 Strengths & Positives"])
     
     with tab1:
-        # Negative categories
-        negative_categories = [
+        # Issue categories with modern styling
+        issue_categories = [
             'size_issues', 'quality_issues', 'noise_issues', 'fit_issues', 
-            'durability_issues', 'value_for_money', 'shipping_packaging'
+            'durability_issues', 'value_issues'
         ]
         
-        issue_found = False
-        for category_key in negative_categories:
+        issues_found = []
+        for category_key in issue_categories:
             if category_key in categories and categories[category_key]['count'] > 0:
-                issue_found = True
-                category_data = categories[category_key]
-                
-                # Format category name
-                category_name = category_key.replace('_', ' ').title()
-                
-                with st.expander(f"🔴 {category_name} ({category_data['count']} reviews)", expanded=category_data['count'] > 5):
-                    st.markdown(f"**Most Common Trend:** {category_data['trend']}")
-                    
-                    st.markdown("**Example Reviews:**")
-                    for review_example in category_data['reviews'][:3]:  # Show top 3 examples
-                        st.markdown(f"• {review_example}")
-                    
-                    if len(category_data['reviews']) > 3:
-                        st.caption(f"...and {len(category_data['reviews']) - 3} more similar reviews")
+                issues_found.append((category_key, categories[category_key]))
         
-        if not issue_found:
-            st.success("✅ No significant complaint categories identified!")
+        if issues_found:
+            # Sort by count (most common first)
+            issues_found.sort(key=lambda x: x[1]['count'], reverse=True)
+            
+            for category_key, category_data in issues_found:
+                category_name = category_key.replace('_', ' ').title()
+                urgency_color = "#F44336" if category_data['count'] > 10 else "#FF9800" if category_data['count'] > 5 else "#FFC107"
+                
+                with st.expander(f"🔴 {category_name} ({category_data['count']} reviews)", expanded=category_data['count'] > 10):
+                    st.markdown(f"""
+                    <div style="background: {urgency_color}20; padding: 1rem; border-radius: 8px; border-left: 4px solid {urgency_color};">
+                        <h4>🎯 Most Common Pattern</h4>
+                        <p><strong>{category_data['trend']}</strong></p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    st.markdown("**📝 Example Customer Feedback:**")
+                    for i, example in enumerate(category_data.get('reviews', category_data.get('examples', []))[:3]):
+                        st.markdown(f"""
+                        <div style="background: #f8f9fa; padding: 0.8rem; border-radius: 6px; margin: 0.5rem 0; border-left: 3px solid #dee2e6;">
+                            <em>"{example}"</em>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    
+                    remaining = len(category_data.get('reviews', category_data.get('examples', []))) - 3
+                    if remaining > 0:
+                        st.caption(f"...and {remaining} more similar reviews")
+        else:
+            st.markdown("""
+            <div style="background: #4CAF5020; padding: 2rem; border-radius: 10px; text-align: center; border: 2px solid #4CAF50;">
+                <h3>🎉 Excellent News!</h3>
+                <p>No significant complaint categories identified in your reviews</p>
+            </div>
+            """, unsafe_allow_html=True)
     
     with tab2:
         # Positive categories
-        positive_categories = ['positive_highlights', 'ease_of_use', 'customer_service']
+        positive_categories = ['positive_highlights', 'ease_of_use']
         
-        positive_found = False
+        positives_found = []
         for category_key in positive_categories:
             if category_key in categories and categories[category_key]['count'] > 0:
-                positive_found = True
-                category_data = categories[category_key]
-                
-                # Format category name
+                positives_found.append((category_key, categories[category_key]))
+        
+        if positives_found:
+            for category_key, category_data in positives_found:
                 category_name = category_key.replace('_', ' ').title()
                 
                 with st.expander(f"🟢 {category_name} ({category_data['count']} reviews)", expanded=True):
-                    st.markdown(f"**Most Common Trend:** {category_data['trend']}")
+                    st.markdown(f"""
+                    <div style="background: #4CAF5020; padding: 1rem; border-radius: 8px; border-left: 4px solid #4CAF50;">
+                        <h4>⭐ Customer Love</h4>
+                        <p><strong>{category_data['trend']}</strong></p>
+                    </div>
+                    """, unsafe_allow_html=True)
                     
-                    st.markdown("**Example Reviews:**")
-                    for review_example in category_data['reviews'][:3]:  # Show top 3 examples
-                        st.markdown(f"• {review_example}")
-                    
-                    if len(category_data['reviews']) > 3:
-                        st.caption(f"...and {len(category_data['reviews']) - 3} more similar reviews")
-        
-        if not positive_found:
+                    st.markdown("**💬 Happy Customer Quotes:**")
+                    for example in category_data.get('reviews', category_data.get('examples', []))[:3]:
+                        st.markdown(f"""
+                        <div style="background: #e8f5e8; padding: 0.8rem; border-radius: 6px; margin: 0.5rem 0; border-left: 3px solid #4CAF50;">
+                            <em>"{example}"</em>
+                        </div>
+                        """, unsafe_allow_html=True)
+        else:
             st.info("ℹ️ No specific positive highlight categories identified")
     
-    # Summary stats
+    # Modern summary with actionable insights
     total_categorized = sum(cat['count'] for cat in categories.values())
-    st.markdown(f"**Total Categorized Reviews:** {total_categorized}")
-    
-    # Top issues summary
     sorted_categories = sorted(categories.items(), key=lambda x: x[1]['count'], reverse=True)
-    top_3_issues = sorted_categories[:3]
     
-    if top_3_issues:
-        st.markdown("**Top 3 Most Common Issues:**")
-        for i, (category_key, category_data) in enumerate(top_3_issues, 1):
+    st.markdown("### 🎯 Action Priority Matrix")
+    
+    if len(sorted_categories) >= 3:
+        top_3 = sorted_categories[:3]
+        
+        col1, col2, col3 = st.columns(3)
+        for i, (category_key, category_data) in enumerate(top_3):
             category_name = category_key.replace('_', ' ').title()
-            st.markdown(f"{i}. **{category_name}**: {category_data['count']} reviews - {category_data['trend']}")
+            priority_colors = ["#F44336", "#FF9800", "#FFC107"]
+            priority_labels = ["🔥 Critical", "⚠️ Important", "📝 Notable"]
+            
+            with [col1, col2, col3][i]:
+                st.markdown(f"""
+                <div style="background: {priority_colors[i]}20; padding: 1rem; border-radius: 8px; 
+                           border: 2px solid {priority_colors[i]}; text-align: center;">
+                    <h4>{priority_labels[i]}</h4>
+                    <h5>{category_name}</h5>
+                    <p><strong>{category_data['count']} reviews</strong></p>
+                    <p><em>{category_data['trend'][:50]}...</em></p>
+                </div>
+                """, unsafe_allow_html=True)
+    
+    st.markdown(f"**📈 Analysis Summary:** {total_categorized} reviews successfully categorized into actionable themes")
 
 def display_basic_results(results):
     """Display basic analysis results"""
@@ -1208,40 +1334,136 @@ def display_basic_results(results):
     st.info("💡 **Upgrade to AI Analysis**: Configure your OpenAI API key to get detailed listing optimization recommendations, customer insights, and actionable improvements.")
 
 def main():
-    """Main application"""
+    """Main application with modern UI/UX"""
     try:
-        # Page config
+        # Page config with modern styling
         st.set_page_config(
-            page_title=APP_CONFIG['title'],
-            page_icon="📊",
+            page_title="Amazon Review Analyzer",
+            page_icon="🚀",
             layout="wide",
             initial_sidebar_state="expanded"
         )
         
+        # Modern CSS styling
+        st.markdown("""
+        <style>
+        /* Main app styling */
+        .main > div {
+            padding-top: 2rem;
+        }
+        
+        /* Header styling */
+        .main-header {
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            padding: 2rem;
+            border-radius: 10px;
+            color: white;
+            margin-bottom: 2rem;
+            text-align: center;
+        }
+        
+        /* Card styling */
+        .custom-card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            border: 1px solid #e0e0e0;
+            margin-bottom: 1rem;
+        }
+        
+        /* Success styling */
+        .success-banner {
+            background: linear-gradient(90deg, #56ab2f 0%, #a8e6cf 100%);
+            padding: 1rem;
+            border-radius: 8px;
+            color: white;
+            margin: 1rem 0;
+        }
+        
+        /* Warning styling */
+        .warning-banner {
+            background: linear-gradient(90deg, #f093fb 0%, #f5576c 100%);
+            padding: 1rem;
+            border-radius: 8px;
+            color: white;
+            margin: 1rem 0;
+        }
+        
+        /* Metrics styling */
+        .metric-card {
+            background: #f8f9fa;
+            padding: 1rem;
+            border-radius: 8px;
+            text-align: center;
+            border: 1px solid #dee2e6;
+        }
+        
+        /* Button styling */
+        .stButton > button {
+            border-radius: 8px;
+            border: none;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-weight: 600;
+            padding: 0.5rem 1rem;
+            transition: all 0.3s ease;
+        }
+        
+        .stButton > button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+        
+        /* Sidebar styling */
+        .css-1d391kg {
+            background: #f8f9fa;
+        }
+        
+        /* Expander styling */
+        .streamlit-expanderHeader {
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        
+        /* Progress bar styling */
+        .stProgress > div > div {
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        
         # Initialize session
         initialize_session_state()
         
-        # Header
-        st.title("📊 Amazon Review Analyzer")
-        st.markdown(f"**{APP_CONFIG['description']}** - Version {APP_CONFIG['version']}")
+        # Modern header
+        st.markdown("""
+        <div class="main-header">
+            <h1>🚀 Amazon Review Analyzer</h1>
+            <p>AI-powered listing optimization through customer feedback analysis</p>
+            <p><em>Transform reviews into actionable insights • Version 5.1</em></p>
+        </div>
+        """, unsafe_allow_html=True)
         
-        # Sidebar with AI status
-        display_ai_status()
+        # Sidebar with modern AI status
+        display_modern_sidebar()
         
-        # Main workflow
+        # Main workflow with improved UX
         if st.session_state.current_step == 'upload':
-            handle_file_upload()
+            handle_modern_file_upload()
             
         elif st.session_state.current_step == 'analysis':
-            display_data_summary()
+            display_modern_data_summary()
             
         elif st.session_state.current_step == 'results':
-            display_analysis_results()
+            display_modern_analysis_results()
             
-            # Action buttons
-            col1, col2, col3 = st.columns(3)
+            # Modern action buttons
+            st.markdown("---")
+            col1, col2, col3, col4 = st.columns(4)
+            
             with col1:
-                if st.button("🔄 Analyze New Data", use_container_width=True):
+                if st.button("🔄 New Analysis", use_container_width=True):
                     st.session_state.current_step = 'upload'
                     st.session_state.uploaded_data = None
                     st.session_state.analysis_results = None
@@ -1253,27 +1475,310 @@ def main():
                     st.rerun()
             
             with col3:
-                if st.button("📥 Export Results", use_container_width=True):
+                if st.button("📊 View Data", use_container_width=True):
+                    st.session_state.current_step = 'analysis'
+                    st.rerun()
+            
+            with col4:
+                if st.button("📥 Export", use_container_width=True):
                     st.info("📥 Export functionality coming soon!")
         
-        # Processing indicator
+        # Modern processing indicator
         if st.session_state.processing:
-            st.info("⚙️ Processing...")
+            st.markdown("""
+            <div class="success-banner">
+                <h4>🔄 Processing Your Analysis...</h4>
+                <p>Our AI is working hard to analyze your reviews. This may take a moment.</p>
+            </div>
+            """, unsafe_allow_html=True)
         
-        # Error/success messages
+        # Modern error/success messages
         if st.session_state.error_message:
-            st.error(st.session_state.error_message)
+            st.markdown(f"""
+            <div class="warning-banner">
+                <h4>⚠️ Attention Needed</h4>
+                <p>{st.session_state.error_message}</p>
+            </div>
+            """, unsafe_allow_html=True)
         
         if st.session_state.success_message:
-            st.success(st.session_state.success_message)
+            st.markdown(f"""
+            <div class="success-banner">
+                <h4>✅ Success!</h4>
+                <p>{st.session_state.success_message}</p>
+            </div>
+            """, unsafe_allow_html=True)
             
     except Exception as e:
         logger.error(f"Application error: {str(e)}")
-        st.error("🚨 Application Error")
-        st.error("An unexpected error occurred. Please refresh and try again.")
+        st.markdown("""
+        <div class="warning-banner">
+            <h4>🚨 Application Error</h4>
+            <p>An unexpected error occurred. Please refresh and try again.</p>
+        </div>
+        """, unsafe_allow_html=True)
         
-        with st.expander("🔍 Error Details"):
+        with st.expander("🔍 Technical Details"):
             st.exception(e)
+
+def display_modern_sidebar():
+    """Modern sidebar with enhanced AI status"""
+    with st.sidebar:
+        st.markdown("### 🤖 AI Intelligence Hub")
+        
+        status = check_ai_status()
+        
+        if status.get('available'):
+            st.markdown("""
+            <div style="background: linear-gradient(90deg, #56ab2f 0%, #a8e6cf 100%); 
+                        padding: 1rem; border-radius: 8px; color: white; text-align: center;">
+                <h4>✅ AI Ready</h4>
+                <p>GPT-4o Analysis Active</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Modern AI Chat toggle
+            if st.button("💬 Launch AI Chat", use_container_width=True):
+                st.session_state.show_chat = True
+                st.rerun()
+        else:
+            st.markdown("""
+            <div style="background: linear-gradient(90deg, #f093fb 0%, #f5576c 100%); 
+                        padding: 1rem; border-radius: 8px; color: white; text-align: center;">
+                <h4>❌ AI Offline</h4>
+                <p>Configuration Required</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Configuration help
+            with st.expander("🔧 Setup Guide"):
+                st.markdown("""
+                **Quick Setup:**
+                
+                1. **Streamlit Secrets:**
+                ```toml
+                [secrets]
+                openai_api_key = "your-key-here"
+                ```
+                
+                2. **Environment Variable:**
+                ```bash
+                export OPENAI_API_KEY="your-key-here"
+                ```
+                
+                3. **Restart the application**
+                """)
+        
+        # Modern app info
+        st.markdown("---")
+        st.markdown("### 📊 App Features")
+        features = [
+            "🤖 AI-Powered Analysis",
+            "📈 Rating Trends",
+            "📅 Date Filtering", 
+            "💬 Smart Chat",
+            "📋 Review Categories",
+            "🎯 Listing Optimization"
+        ]
+        
+        for feature in features:
+            st.markdown(f"• {feature}")
+
+def handle_modern_file_upload():
+    """Modern file upload interface"""
+    
+    # Optional listing information section with modern styling
+    with st.expander("📝 Current Listing Information (Optional)", expanded=False):
+        st.markdown("""
+        <div style="background: #f8f9fa; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
+            <h4>📋 Listing Context</h4>
+            <p>Add your current listing details for comparative insights and optimization recommendations</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        current_title = st.text_area(
+            "Current Listing Title:",
+            value=st.session_state.current_listing_title,
+            height=100,
+            placeholder="Example: Premium Wireless Bluetooth Headphones - Noise Cancelling, 30Hr Battery..."
+        )
+        
+        current_description = st.text_area(
+            "Current Listing Description/Bullets:",
+            value=st.session_state.current_listing_description,
+            height=200,
+            placeholder="• Feature 1: Premium sound quality with advanced drivers\n• Feature 2: Long-lasting 30-hour battery life\n• Feature 3: Active noise cancellation technology..."
+        )
+        
+        if st.button("💾 Save Listing Context", use_container_width=True):
+            st.session_state.current_listing_title = current_title
+            st.session_state.current_listing_description = current_description
+            st.success("✅ Listing information saved for analysis context")
+    
+    # Modern upload section
+    st.markdown("""
+    <div class="custom-card">
+        <h3>📁 Upload Your Review Data</h3>
+        <p>Upload Amazon review exports (CSV/Excel) for comprehensive AI analysis</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # File uploader with modern styling
+    uploaded_file = st.file_uploader(
+        "Choose your review export file",
+        type=['csv', 'xlsx', 'xls'],
+        help="Supported: CSV, Excel (.xlsx, .xls) • Max size: 50MB"
+    )
+    
+    col1, col2 = st.columns([3, 1])
+    
+    with col1:
+        if uploaded_file is not None:
+            # Modern file info display
+            file_size_mb = uploaded_file.size / (1024 * 1024)
+            st.markdown(f"""
+            <div style="background: #e3f2fd; padding: 1rem; border-radius: 8px; margin: 1rem 0;">
+                <h4>📄 {uploaded_file.name}</h4>
+                <p><strong>Size:</strong> {file_size_mb:.1f} MB • <strong>Type:</strong> {uploaded_file.type}</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            if st.button("🚀 Process & Analyze", type="primary", use_container_width=True):
+                process_uploaded_file(uploaded_file)
+    
+    with col2:
+        if st.button("📊 Try Demo Data", use_container_width=True):
+            load_example_reviews()
+    
+    # Modern help section
+    with st.expander("❓ Need Help?"):
+        st.markdown("""
+        **Supported File Formats:**
+        - ✅ CSV files from Amazon exports
+        - ✅ Excel files (.xlsx, .xls)
+        - ✅ Helium 10 review exports
+        
+        **Required Columns:**
+        - `Title` - Review titles
+        - `Body` - Review content
+        - `Rating` - Star ratings (1-5)
+        - `Date` - Review dates
+        
+        **Tips for Best Results:**
+        - Include 50+ reviews for comprehensive analysis
+        - Ensure review text is in English (multilingual support coming)
+        - Add your current listing info for better optimization insights
+        """)
+
+def display_modern_data_summary():
+    """Modern data summary with enhanced UX"""
+    if not st.session_state.uploaded_data:
+        return
+    
+    data = st.session_state.uploaded_data
+    product_info = data['product_info']
+    reviews = data['reviews']
+    
+    st.markdown("## 📊 Review Data Dashboard")
+    
+    # Show AI chat option
+    display_ai_chat()
+    
+    # Date filtering section with modern styling
+    if data.get('date_range'):
+        display_modern_date_filtering(data)
+    
+    # Use filtered data if available
+    current_reviews = st.session_state.filtered_data if st.session_state.filtered_data else reviews
+    current_data_label = "Filtered Analysis" if st.session_state.filtered_data else "Complete Dataset"
+    
+    # Modern metrics dashboard
+    st.markdown(f"### 📈 {current_data_label} Overview")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.markdown(f"""
+        <div class="metric-card">
+            <h2>{len(current_reviews)}</h2>
+            <p>Total Reviews</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        ratings = [r['rating'] for r in current_reviews if r['rating']]
+        avg_rating = sum(ratings) / len(ratings) if ratings else 0
+        rating_color = "#4CAF50" if avg_rating >= 4 else "#FF9800" if avg_rating >= 3 else "#F44336"
+        st.markdown(f"""
+        <div class="metric-card">
+            <h2 style="color: {rating_color}">{avg_rating:.1f}/5</h2>
+            <p>Average Rating</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        verified_count = sum(1 for r in current_reviews if r.get('verified'))
+        verification_rate = (verified_count / len(current_reviews)) * 100 if current_reviews else 0
+        st.markdown(f"""
+        <div class="metric-card">
+            <h2>{verified_count}</h2>
+            <p>Verified ({verification_rate:.0f}%)</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col4:
+        st.markdown(f"""
+        <div class="metric-card">
+            <h2>{product_info['asin']}</h2>
+            <p>Product ASIN</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Rating trends with modern display
+    if data.get('rating_trends') and data['rating_trends'].get('success'):
+        display_rating_trends(data['rating_trends'])
+    
+    # Modern rating distribution
+    if ratings:
+        display_modern_rating_distribution(current_reviews, current_data_label)
+    
+    # Modern analysis CTA
+    st.markdown("---")
+    st.markdown("""
+    <div style="background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); 
+                padding: 2rem; border-radius: 10px; color: white; text-align: center; margin: 2rem 0;">
+        <h3>🤖 Ready for AI Analysis?</h3>
+        <p>Transform your customer feedback into actionable listing optimization insights</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    if st.button("🚀 Launch AI Analysis", type="primary", use_container_width=True):
+        run_ai_analysis()
+
+def display_modern_analysis_results():
+    """Modern analysis results display"""
+    if not st.session_state.analysis_results:
+        st.error("No analysis results available")
+        return
+    
+    results = st.session_state.analysis_results
+    
+    # Modern results header
+    st.markdown("""
+    <div style="background: linear-gradient(90deg, #56ab2f 0%, #a8e6cf 100%); 
+                padding: 2rem; border-radius: 10px; color: white; text-align: center; margin-bottom: 2rem;">
+        <h2>🤖 AI Analysis Complete</h2>
+        <p>Your comprehensive review analysis is ready</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Show AI chat for discussing results
+    display_ai_chat()
+    
+    if results.get('ai_analysis'):
+        display_comprehensive_ai_results(results)
+    else:
+        display_basic_results(results)
 
 if __name__ == "__main__":
     main()
