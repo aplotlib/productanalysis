@@ -877,7 +877,7 @@ def display_review_categories(categories):
         st.markdown("**Top 3 Most Common Issues:**")
         for i, (category_key, category_data) in enumerate(top_3_issues, 1):
             category_name = category_key.replace('_', ' ').title()
-            st.markdown(f"{i}. **{category_name}**: {category_data['count']} reviews - {category_data['trend']}"))
+            st.markdown(f"{i}. **{category_name}**: {category_data['count']} reviews - {category_data['trend']}")
 
 def display_basic_results(results):
     """Display basic analysis results"""
