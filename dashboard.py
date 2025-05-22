@@ -929,8 +929,15 @@ class DashboardRenderer:
                     with st.expander(f"Scorecard: {score.product_name}"):
                         self._render_mini_scorecard(score)
                 
-                if st.button("📥 Download All Scorecards (PDF)", use_container_width=True):
-                    st.success("Scorecard download initiated!")
+                # Generate scorecard data
+                scorecard_data = self._generate_scorecard_csv(scores)
+                st.download_button(
+                    label="📥 Download Performance Scorecards (CSV)",
+                    data=scorecard_data,
+                    file_name=f"performance_scorecards_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
             else:
                 st.info("No scored products available for export.")
         
@@ -944,22 +951,37 @@ class DashboardRenderer:
                 score_values = [s.composite_score for s in scores.values()]
                 avg_score = np.mean(score_values)
                 
-                st.markdown(f"""
-                **Portfolio Performance:** {avg_score:.1f}/100 ({self._get_performance_level_text(avg_score)})
+                summary_text = f"""# Portfolio Executive Summary
+Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}
+
+## Performance Overview
+- Portfolio Average: {avg_score:.1f}/100 ({self._get_performance_level_text(avg_score)})
+- Total Products Analyzed: {len(scores)}
+- Top Performers (70+ score): {sum(1 for s in score_values if s >= 70)}
+- Priority Products (<55 score): {sum(1 for s in score_values if s < 55)}
+
+## Key Recommendations
+1. Focus on return rate optimization for underperforming products
+2. Leverage AI insights to improve customer satisfaction
+3. Implement listing optimizations for conversion improvement
+
+## Product Performance Distribution
+- Excellent (85+): {sum(1 for s in score_values if s >= 85)} products
+- Good (70-84): {sum(1 for s in score_values if 70 <= s < 85)} products
+- Average (55-69): {sum(1 for s in score_values if 55 <= s < 70)} products
+- Needs Improvement (40-54): {sum(1 for s in score_values if 40 <= s < 55)} products
+- Critical (<40): {sum(1 for s in score_values if s < 40)} products
+"""
                 
-                **Key Highlights:**
-                - {len(scores)} products analyzed
-                - {sum(1 for s in score_values if s >= 70)} products performing well (70+ score)
-                - {sum(1 for s in score_values if s < 55)} products need immediate attention
+                st.markdown(summary_text)
                 
-                **Recommended Actions:**
-                1. Focus on return rate optimization for underperforming products
-                2. Leverage AI insights to improve customer satisfaction
-                3. Implement listing optimizations for conversion improvement
-                """)
-                
-                if st.button("📥 Download Executive Report (PDF)", use_container_width=True):
-                    st.success("Executive report download initiated!")
+                st.download_button(
+                    label="📥 Download Executive Report (Text)",
+                    data=summary_text,
+                    file_name=f"executive_report_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
+                    mime="text/plain",
+                    use_container_width=True
+                )
             else:
                 st.info("Generate product scores first to create executive report.")
         
@@ -975,16 +997,27 @@ class DashboardRenderer:
                             all_actions.append({
                                 'ASIN': score.asin,
                                 'Product': score.product_name,
+                                'Current_Score': score.composite_score,
+                                'Performance_Level': score.performance_level,
                                 'Action': action,
-                                'Priority': 'High' if score.composite_score < 55 else 'Medium'
+                                'Priority': 'High' if score.composite_score < 55 else 'Medium',
+                                'Revenue_Impact': score.revenue_impact if score.revenue_impact else '',
+                                'Potential_Savings': score.potential_savings if score.potential_savings else ''
                             })
                 
                 if all_actions:
                     action_df = pd.DataFrame(all_actions)
                     st.dataframe(action_df, use_container_width=True)
                     
-                    if st.button("📥 Download Action Items (Excel)", use_container_width=True):
-                        st.success("Action items download initiated!")
+                    # Convert to CSV
+                    csv_data = action_df.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Download Action Items (CSV)",
+                        data=csv_data,
+                        file_name=f"action_items_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
                 else:
                     st.info("No action items generated yet.")
             else:
@@ -993,22 +1026,51 @@ class DashboardRenderer:
         with export_tabs[3]:
             st.markdown("### Raw Data Export")
             
-            export_format = st.selectbox(
-                "Select export format:",
-                ["Excel (.xlsx)", "CSV (.csv)", "JSON (.json)"]
-            )
-            
-            include_options = st.multiselect(
-                "Include data:",
-                ["Product Scores", "Component Breakdown", "AI Analysis", "Recommendations"],
-                default=["Product Scores", "Component Breakdown"]
-            )
-            
-            if st.button("📥 Generate Export", use_container_width=True):
-                with st.spinner("Generating export..."):
-                    import time
-                    time.sleep(1)
-                st.success(f"Export generated! Download will begin shortly.")
+            if scores:
+                export_format = st.selectbox(
+                    "Select export format:",
+                    ["CSV", "Excel", "JSON"]
+                )
+                
+                include_options = st.multiselect(
+                    "Include data:",
+                    ["Product Scores", "Component Breakdown", "Recommendations", "Risk Factors"],
+                    default=["Product Scores", "Component Breakdown"]
+                )
+                
+                if st.button("📊 Generate Export", use_container_width=True):
+                    # Generate the appropriate export
+                    if export_format == "CSV":
+                        export_data = self._generate_detailed_csv(scores, include_options)
+                        st.download_button(
+                            label="📥 Download CSV Export",
+                            data=export_data,
+                            file_name=f"product_analysis_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                            mime="text/csv",
+                            use_container_width=True
+                        )
+                    
+                    elif export_format == "Excel":
+                        excel_data = self._generate_excel_export(scores, include_options)
+                        st.download_button(
+                            label="📥 Download Excel Export", 
+                            data=excel_data,
+                            file_name=f"product_analysis_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True
+                        )
+                    
+                    elif export_format == "JSON":
+                        json_data = self._generate_json_export(scores, include_options)
+                        st.download_button(
+                            label="📥 Download JSON Export",
+                            data=json_data,
+                            file_name=f"product_analysis_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
+                            mime="application/json",
+                            use_container_width=True
+                        )
+            else:
+                st.info("No scored products available for export.")
     
     def _render_mini_scorecard(self, score: Any):
         """Render a mini scorecard for a product"""
@@ -1055,6 +1117,143 @@ class DashboardRenderer:
             return "Needs Improvement"
         else:
             return "Critical"
+    
+    def _generate_scorecard_csv(self, scores: Dict[str, Any]) -> str:
+        """Generate CSV data for scorecards"""
+        data = []
+        for asin, score in scores.items():
+            data.append({
+                'ASIN': score.asin,
+                'Product_Name': score.product_name,
+                'Category': score.category,
+                'Composite_Score': score.composite_score,
+                'Performance_Level': score.performance_level,
+                'Sales_Performance': score.component_scores['sales_performance'].raw_score,
+                'Return_Rate_Score': score.component_scores['return_rate'].raw_score,
+                'Customer_Satisfaction': score.component_scores['customer_satisfaction'].raw_score,
+                'Review_Engagement': score.component_scores['review_engagement'].raw_score,
+                'Profitability': score.component_scores['profitability'].raw_score,
+                'Competitive_Position': score.component_scores['competitive_position'].raw_score,
+                'Top_Priority': score.improvement_priority[0] if score.improvement_priority else '',
+                'Revenue_Impact': score.revenue_impact or 0,
+                'Potential_Savings': score.potential_savings or 0,
+                'Risk_Count': len(score.risk_factors) if score.risk_factors else 0,
+                'Strength_Count': len(score.strengths) if score.strengths else 0
+            })
+        
+        df = pd.DataFrame(data)
+        return df.to_csv(index=False)
+    
+    def _generate_detailed_csv(self, scores: Dict[str, Any], include_options: List[str]) -> str:
+        """Generate detailed CSV export"""
+        data = []
+        for asin, score in scores.items():
+            row = {
+                'ASIN': score.asin,
+                'Product_Name': score.product_name,
+                'Category': score.category,
+                'Composite_Score': score.composite_score,
+                'Performance_Level': score.performance_level
+            }
+            
+            if "Component Breakdown" in include_options:
+                for comp_name, comp_score in score.component_scores.items():
+                    row[f'{comp_name}_Score'] = comp_score.raw_score
+                    row[f'{comp_name}_Performance'] = comp_score.performance_level
+            
+            if "Recommendations" in include_options and score.improvement_priority:
+                for i, rec in enumerate(score.improvement_priority[:3], 1):
+                    row[f'Recommendation_{i}'] = rec
+            
+            if "Risk Factors" in include_options and score.risk_factors:
+                for i, risk in enumerate(score.risk_factors[:3], 1):
+                    row[f'Risk_Factor_{i}'] = risk
+            
+            data.append(row)
+        
+        df = pd.DataFrame(data)
+        return df.to_csv(index=False)
+    
+    def _generate_excel_export(self, scores: Dict[str, Any], include_options: List[str]) -> bytes:
+        """Generate Excel export"""
+        import io
+        output = io.BytesIO()
+        
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            # Main scores sheet
+            scores_data = []
+            for asin, score in scores.items():
+                scores_data.append({
+                    'ASIN': score.asin,
+                    'Product_Name': score.product_name,
+                    'Category': score.category,
+                    'Composite_Score': score.composite_score,
+                    'Performance_Level': score.performance_level,
+                    'Revenue_Impact': score.revenue_impact or 0,
+                    'Potential_Savings': score.potential_savings or 0
+                })
+            
+            scores_df = pd.DataFrame(scores_data)
+            scores_df.to_excel(writer, sheet_name='Product_Scores', index=False)
+            
+            # Component breakdown sheet if requested
+            if "Component Breakdown" in include_options:
+                component_data = []
+                for asin, score in scores.items():
+                    for comp_name, comp_score in score.component_scores.items():
+                        component_data.append({
+                            'ASIN': score.asin,
+                            'Product_Name': score.product_name,
+                            'Component': comp_name,
+                            'Score': comp_score.raw_score,
+                            'Performance_Level': comp_score.performance_level,
+                            'Weight': comp_score.weight,
+                            'Benchmark_Comparison': comp_score.benchmark_comparison
+                        })
+                
+                comp_df = pd.DataFrame(component_data)
+                comp_df.to_excel(writer, sheet_name='Component_Breakdown', index=False)
+        
+        output.seek(0)
+        return output.getvalue()
+    
+    def _generate_json_export(self, scores: Dict[str, Any], include_options: List[str]) -> str:
+        """Generate JSON export"""
+        import json
+        
+        export_data = {
+            'generated_at': datetime.now().isoformat(),
+            'total_products': len(scores),
+            'products': {}
+        }
+        
+        for asin, score in scores.items():
+            product_data = {
+                'asin': score.asin,
+                'product_name': score.product_name,
+                'category': score.category,
+                'composite_score': score.composite_score,
+                'performance_level': score.performance_level
+            }
+            
+            if "Component Breakdown" in include_options:
+                product_data['component_scores'] = {}
+                for comp_name, comp_score in score.component_scores.items():
+                    product_data['component_scores'][comp_name] = {
+                        'score': comp_score.raw_score,
+                        'performance_level': comp_score.performance_level,
+                        'weight': comp_score.weight
+                    }
+            
+            if "Recommendations" in include_options:
+                product_data['recommendations'] = score.improvement_priority or []
+            
+            if "Risk Factors" in include_options:
+                product_data['risk_factors'] = score.risk_factors or []
+            
+            export_data['products'][asin] = product_data
+        
+        return json.dumps(export_data, indent=2)
 
 # Main dashboard class
 class ProfessionalDashboard:
