@@ -1,103 +1,171 @@
 """
-AI Analysis module for Amazon Medical Device Listing Optimizer
+Enhanced AI Analysis Module for Amazon Medical Device Listing Optimizer
 
-This module contains functions for performing AI-based analysis of
-Amazon medical device product reviews, return reasons, listings, and other data.
+This module provides precise, product-specific AI analysis with:
+- Structured, actionable recommendations
+- Product-specific insights based on actual data
+- Professional formatting for business users
+- Efficient token management for large datasets
+- Robust error handling and fallbacks
+
+Author: Assistant
+Version: 2.0
 """
 
 import logging
 import os
 import json
+import re
+import requests
 import pandas as pd
 import numpy as np
 from datetime import datetime
-import re
-import requests
+from typing import Dict, List, Any, Optional, Tuple, Union
+from dataclasses import dataclass, asdict
+from collections import defaultdict, Counter
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, 
                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Try importing OpenAI for SDK fallback if needed
+# Try importing OpenAI for fallback SDK support
 try:
     import openai
-    from openai import OpenAI  # Import OpenAI client for newer SDK
-    HAS_OPENAI = True
+    HAS_OPENAI_SDK = True
 except ImportError:
-    logger.warning("OpenAI module not available")
-    HAS_OPENAI = False
+    HAS_OPENAI_SDK = False
+    logger.warning("OpenAI SDK not available, using direct API calls")
 
-# Amazon-specific keywords for listing optimization
-AMAZON_KEYWORDS = {
-    'listing_quality': ['title', 'bullet', 'description', 'feature', 'benefit', 'keyword', 'search term'],
-    'customer_concerns': ['size', 'fit', 'quality', 'durability', 'comfort', 'broken', 'difficult'],
-    'competitive_factors': ['price', 'value', 'better', 'cheaper', 'competitor', 'alternative', 'similar'],
-    'purchase_factors': ['decision', 'purchase', 'bought', 'chose', 'recommend', 'satisfied', 'happy'],
-    'return_factors': ['return', 'refund', 'sent back', 'disappointed', 'expected', 'not as described'],
-    'image_factors': ['picture', 'photo', 'image', 'looks different', 'see', 'shown', 'display'],
-    'ecommerce_specific': ['shipping', 'packaging', 'arrived', 'delivery', 'box', 'amazon']
+# Constants
+API_TIMEOUT = 45
+MAX_RETRIES = 3
+TOKEN_LIMIT_GPT4 = 8000  # Conservative limit for GPT-4
+MAX_ITEMS_DETAILED_ANALYSIS = 15
+MAX_ITEMS_BULK_ANALYSIS = 50
+
+# Medical device specific analysis keywords
+MEDICAL_ANALYSIS_KEYWORDS = {
+    'safety_concerns': [
+        'unsafe', 'dangerous', 'injury', 'hurt', 'hazard', 'broken', 'defective',
+        'sharp', 'cuts', 'pinch', 'trap', 'unstable', 'tip', 'fall'
+    ],
+    'efficacy_issues': [
+        'doesnt work', 'ineffective', 'no relief', 'no help', 'useless',
+        'waste of money', 'doesnt help', 'no improvement', 'no difference'
+    ],
+    'comfort_problems': [
+        'uncomfortable', 'painful', 'hurts', 'sore', 'irritating', 'rough',
+        'hard', 'stiff', 'tight', 'pinches', 'digs in', 'pressure'
+    ],
+    'durability_concerns': [
+        'broke', 'broken', 'fell apart', 'cheaply made', 'flimsy', 'weak',
+        'tore', 'ripped', 'cracked', 'split', 'bent', 'snapped'
+    ],
+    'sizing_fit_issues': [
+        'too small', 'too big', 'wrong size', 'doesnt fit', 'tight', 'loose',
+        'runs small', 'runs large', 'sizing chart wrong', 'measurements off'
+    ],
+    'positive_indicators': [
+        'love it', 'excellent', 'perfect', 'amazing', 'great quality',
+        'highly recommend', 'best purchase', 'life changer', 'works great'
+    ]
 }
 
-# Medical device specific keywords for analysis
-MEDICAL_KEYWORDS = {
-    'safety': ['safe', 'unsafe', 'injury', 'hurt', 'hazard', 'danger', 'risk', 'warning', 'precaution'],
-    'efficacy': ['effective', 'ineffective', 'work', 'doesn\'t work', 'helped', 'improve', 'benefit'],
-    'comfort': ['comfortable', 'uncomfortable', 'pain', 'painful', 'soft', 'hard', 'irritate', 'sore'],
-    'durability': ['durable', 'broke', 'broken', 'sturdy', 'flimsy', 'quality', 'lasting', 'cheaply made'],
-    'usability': ['easy', 'difficult', 'complicated', 'simple', 'intuitive', 'confusing', 'instructions'],
-    'fit': ['fit', 'size', 'small', 'large', 'tight', 'loose', 'adjustable', 'measurement'],
-    'regulatory': ['fda', 'approved', 'certified', 'medical grade', 'compliant', 'regulation', 'complies']
+# Amazon listing optimization focus areas
+LISTING_OPTIMIZATION_AREAS = {
+    'title_optimization': [
+        'keywords', 'search terms', 'findability', 'character limit',
+        'brand name', 'model number', 'key benefits'
+    ],
+    'bullet_points': [
+        'benefits over features', 'pain points', 'use cases',
+        'dimensions', 'materials', 'certifications'
+    ],
+    'images': [
+        'lifestyle shots', 'size reference', 'feature callouts',
+        'before/after', 'usage demonstration', 'packaging'
+    ],
+    'description': [
+        'detailed benefits', 'comparison chart', 'use instructions',
+        'care instructions', 'warranty info', 'compliance'
+    ]
 }
 
-def get_api_key():
-    """
-    Get the OpenAI API key from various sources
+@dataclass
+class AnalysisResult:
+    """Structured container for analysis results"""
+    success: bool
+    analysis_type: str
+    product_asin: str
+    product_name: str
+    timestamp: str
+    summary: Dict[str, Any]
+    detailed_findings: Dict[str, Any]
+    recommendations: List[Dict[str, Any]]
+    confidence_score: float
+    data_quality: Dict[str, Any]
+    errors: List[str] = None
     
-    Returns:
-    - API key string or None
-    """
-    # First, try to get from streamlit secrets
-    try:
-        import streamlit as st
-        # Try different possible key names
-        for key_name in ["openai_api_key", "OPENAI_API_KEY"]:
-            if hasattr(st, 'secrets') and key_name in st.secrets:
-                logger.info(f"Found API key in Streamlit secrets as '{key_name}'")
-                return st.secrets[key_name]
-    except (ImportError, AttributeError) as e:
-        logger.warning(f"Error accessing Streamlit secrets: {str(e)}")
-    
-    # Then try environment variable as fallback
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if api_key:
-        logger.info("Found API key in environment variables")
-    return api_key
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for serialization"""
+        return asdict(self)
 
-def call_openai_api(messages, model="gpt-4o", temperature=0.1, max_tokens=1000):
-    """
-    Make a direct call to the OpenAI API
+@dataclass
+class RecommendationItem:
+    """Structured recommendation with priority and expected impact"""
+    category: str
+    issue: str
+    recommendation: str
+    priority: str  # High, Medium, Low
+    expected_impact: str
+    implementation_effort: str  # Easy, Medium, Hard
+    specific_action: str
+    success_metric: str
+
+class APIClient:
+    """Handles OpenAI API communication with robust error handling"""
     
-    Parameters:
-    - messages: List of message dictionaries
-    - model: Model name to use
-    - temperature: Temperature setting
-    - max_tokens: Maximum tokens in the response
+    def __init__(self):
+        self.api_key = self._get_api_key()
+        self.base_url = "https://api.openai.com/v1/chat/completions"
+        self.headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}" if self.api_key else ""
+        }
     
-    Returns:
-    - API response text or error message
-    """
-    api_key = get_api_key()
-    
-    if not api_key:
-        logger.error("OpenAI API key not found in any location")
+    def _get_api_key(self) -> Optional[str]:
+        """Get API key from multiple sources"""
+        # Try Streamlit secrets first
+        try:
+            import streamlit as st
+            if hasattr(st, 'secrets'):
+                for key_name in ["openai_api_key", "OPENAI_API_KEY"]:
+                    if key_name in st.secrets:
+                        logger.info(f"Found API key in Streamlit secrets")
+                        return st.secrets[key_name]
+        except (ImportError, AttributeError, KeyError):
+            pass
+        
+        # Try environment variable
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if api_key:
+            logger.info("Found API key in environment variables")
+            return api_key
+        
+        logger.warning("No API key found")
         return None
     
-    try:
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}"
-        }
+    def call_api(self, messages: List[Dict[str, str]], model: str = "gpt-4o", 
+                temperature: float = 0.1, max_tokens: int = 1500) -> Dict[str, Any]:
+        """Make API call with retry logic and error handling"""
+        
+        if not self.api_key:
+            return {
+                "success": False,
+                "error": "API key not configured",
+                "result": None
+            }
         
         payload = {
             "model": model,
@@ -106,984 +174,1075 @@ def call_openai_api(messages, model="gpt-4o", temperature=0.1, max_tokens=1000):
             "max_tokens": max_tokens
         }
         
-        logger.info(f"Calling OpenAI API with model {model}")
-        response = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers=headers,
-            data=json.dumps(payload),
-            timeout=30
+        for attempt in range(MAX_RETRIES):
+            try:
+                logger.info(f"Making API call (attempt {attempt + 1}/{MAX_RETRIES})")
+                
+                response = requests.post(
+                    self.base_url,
+                    headers=self.headers,
+                    data=json.dumps(payload),
+                    timeout=API_TIMEOUT
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    return {
+                        "success": True,
+                        "result": result["choices"][0]["message"]["content"],
+                        "usage": result.get("usage", {}),
+                        "model": model
+                    }
+                elif response.status_code == 429:
+                    # Rate limit - wait and retry
+                    wait_time = 2 ** attempt
+                    logger.warning(f"Rate limited, waiting {wait_time} seconds")
+                    import time
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    logger.error(f"API error {response.status_code}: {response.text}")
+                    return {
+                        "success": False,
+                        "error": f"API error {response.status_code}: {response.text}",
+                        "result": None
+                    }
+                    
+            except requests.exceptions.Timeout:
+                logger.warning(f"API timeout on attempt {attempt + 1}")
+                if attempt == MAX_RETRIES - 1:
+                    return {
+                        "success": False,
+                        "error": "API timeout after multiple attempts",
+                        "result": None
+                    }
+            except Exception as e:
+                logger.error(f"API call error: {str(e)}")
+                if attempt == MAX_RETRIES - 1:
+                    return {
+                        "success": False,
+                        "error": f"API call failed: {str(e)}",
+                        "result": None
+                    }
+        
+        return {
+            "success": False,
+            "error": "Max retries exceeded",
+            "result": None
+        }
+
+class DataPreprocessor:
+    """Prepares and optimizes data for AI analysis"""
+    
+    @staticmethod
+    def analyze_review_quality(reviews: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Analyze quality and characteristics of review data"""
+        if not reviews:
+            return {"total": 0, "quality": "no_data"}
+        
+        total_reviews = len(reviews)
+        ratings = [r.get('rating') for r in reviews if r.get('rating')]
+        texts = [r.get('review_text', '') for r in reviews if r.get('review_text')]
+        
+        # Calculate text length statistics
+        text_lengths = [len(text) for text in texts if text]
+        avg_text_length = np.mean(text_lengths) if text_lengths else 0
+        
+        # Rating distribution
+        rating_dist = Counter(ratings) if ratings else {}
+        
+        # Quality assessment
+        quality = "high"
+        if avg_text_length < 50:
+            quality = "low"
+        elif avg_text_length < 150:
+            quality = "medium"
+        
+        return {
+            "total": total_reviews,
+            "quality": quality,
+            "avg_text_length": round(avg_text_length, 1),
+            "rating_distribution": dict(rating_dist),
+            "has_detailed_text": len([t for t in texts if len(t) > 100]),
+            "avg_rating": round(np.mean(ratings), 2) if ratings else None
+        }
+    
+    @staticmethod
+    def analyze_return_quality(returns: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Analyze quality and characteristics of return data"""
+        if not returns:
+            return {"total": 0, "quality": "no_data"}
+        
+        total_returns = len(returns)
+        reasons = [r.get('return_reason', '') for r in returns if r.get('return_reason')]
+        
+        # Calculate reason length statistics
+        reason_lengths = [len(reason) for reason in reasons if reason]
+        avg_reason_length = np.mean(reason_lengths) if reason_lengths else 0
+        
+        # Quality assessment
+        quality = "high"
+        if avg_reason_length < 20:
+            quality = "low"
+        elif avg_reason_length < 50:
+            quality = "medium"
+        
+        return {
+            "total": total_returns,
+            "quality": quality,
+            "avg_reason_length": round(avg_reason_length, 1),
+            "detailed_reasons": len([r for r in reasons if len(r) > 50])
+        }
+    
+    @staticmethod
+    def create_smart_summary(reviews: List[Dict[str, Any]], 
+                           returns: List[Dict[str, Any]], 
+                           max_tokens: int = 4000) -> Dict[str, str]:
+        """Create intelligent summary prioritizing most important data"""
+        
+        # Analyze data quality
+        review_quality = DataPreprocessor.analyze_review_quality(reviews)
+        return_quality = DataPreprocessor.analyze_return_quality(returns)
+        
+        summary = {}
+        
+        # Summarize reviews intelligently
+        if reviews:
+            summary['reviews'] = DataPreprocessor._summarize_reviews_smart(
+                reviews, review_quality, max_tokens // 2
+            )
+        
+        # Summarize returns intelligently
+        if returns:
+            summary['returns'] = DataPreprocessor._summarize_returns_smart(
+                returns, return_quality, max_tokens // 2
+            )
+        
+        return summary
+    
+    @staticmethod
+    def _summarize_reviews_smart(reviews: List[Dict[str, Any]], 
+                               quality_info: Dict[str, Any], 
+                               max_tokens: int) -> str:
+        """Create smart review summary prioritizing valuable insights"""
+        
+        # Sort reviews by value for analysis
+        def review_value_score(review):
+            rating = review.get('rating', 3)
+            text_length = len(review.get('review_text', ''))
+            
+            # Prioritize extreme ratings and detailed reviews
+            rating_value = abs(rating - 3) * 2  # Extreme ratings more valuable
+            length_value = min(text_length / 100, 3)  # Cap length value
+            
+            return rating_value + length_value
+        
+        sorted_reviews = sorted(reviews, key=review_value_score, reverse=True)
+        
+        # Take top reviews up to token limit
+        selected_reviews = sorted_reviews[:MAX_ITEMS_DETAILED_ANALYSIS]
+        
+        # Create summary
+        summary_parts = [
+            f"REVIEW ANALYSIS ({len(reviews)} total reviews)",
+            f"Average Rating: {quality_info.get('avg_rating', 'N/A')}",
+            f"Rating Distribution: {quality_info.get('rating_distribution', {})}",
+            ""
+        ]
+        
+        # Add detailed reviews
+        summary_parts.append("DETAILED REVIEWS (most valuable for analysis):")
+        for i, review in enumerate(selected_reviews, 1):
+            rating = review.get('rating', 'N/A')
+            text = review.get('review_text', '')[:300]  # Truncate long reviews
+            summary_parts.append(f"{i}. [{rating}★] {text}")
+        
+        # Add pattern analysis
+        all_text = ' '.join([r.get('review_text', '') for r in reviews]).lower()
+        patterns = []
+        
+        for category, keywords in MEDICAL_ANALYSIS_KEYWORDS.items():
+            mentions = sum(1 for keyword in keywords if keyword in all_text)
+            if mentions > 0:
+                patterns.append(f"{category}: {mentions} mentions")
+        
+        if patterns:
+            summary_parts.extend(["", "PATTERN ANALYSIS:"] + patterns)
+        
+        return '\n'.join(summary_parts)
+    
+    @staticmethod
+    def _summarize_returns_smart(returns: List[Dict[str, Any]], 
+                               quality_info: Dict[str, Any], 
+                               max_tokens: int) -> str:
+        """Create smart return summary with categorization"""
+        
+        # Categorize returns
+        categories = defaultdict(list)
+        for return_item in returns:
+            reason = return_item.get('return_reason', '').lower()
+            
+            # Simple categorization based on keywords
+            categorized = False
+            for category, keywords in MEDICAL_ANALYSIS_KEYWORDS.items():
+                if any(keyword in reason for keyword in keywords):
+                    categories[category].append(return_item)
+                    categorized = True
+                    break
+            
+            if not categorized:
+                categories['other'].append(return_item)
+        
+        # Create summary
+        summary_parts = [
+            f"RETURN ANALYSIS ({len(returns)} total returns)",
+            ""
+        ]
+        
+        # Add category breakdown
+        summary_parts.append("RETURN CATEGORIES:")
+        for category, items in categories.items():
+            if items:
+                percentage = (len(items) / len(returns)) * 100
+                summary_parts.append(f"- {category}: {len(items)} returns ({percentage:.1f}%)")
+        
+        # Add detailed return reasons
+        summary_parts.extend(["", "DETAILED RETURN REASONS:"])
+        for i, return_item in enumerate(returns[:MAX_ITEMS_DETAILED_ANALYSIS], 1):
+            reason = return_item.get('return_reason', '')
+            summary_parts.append(f"{i}. {reason}")
+        
+        return '\n'.join(summary_parts)
+
+class ProductSpecificAnalyzer:
+    """Provides product-specific, targeted AI analysis"""
+    
+    def __init__(self, api_client: APIClient):
+        self.api_client = api_client
+        self.preprocessor = DataPreprocessor()
+    
+    def analyze_reviews_comprehensive(self, product_info: Dict[str, Any], 
+                                    reviews: List[Dict[str, Any]]) -> AnalysisResult:
+        """Comprehensive, product-specific review analysis"""
+        
+        try:
+            # Analyze data quality
+            review_quality = self.preprocessor.analyze_review_quality(reviews)
+            
+            if review_quality['total'] == 0:
+                return AnalysisResult(
+                    success=False,
+                    analysis_type="review_analysis",
+                    product_asin=product_info.get('asin', 'unknown'),
+                    product_name=product_info.get('name', 'Unknown Product'),
+                    timestamp=datetime.now().isoformat(),
+                    summary={},
+                    detailed_findings={},
+                    recommendations=[],
+                    confidence_score=0.0,
+                    data_quality=review_quality,
+                    errors=["No review data available"]
+                )
+            
+            # Create targeted summary
+            review_summary = self.preprocessor._summarize_reviews_smart(
+                reviews, review_quality, 3000
+            )
+            
+            # Create product-specific prompt
+            system_prompt = self._create_review_system_prompt(product_info)
+            user_prompt = self._create_review_analysis_prompt(
+                product_info, review_summary, review_quality
+            )
+            
+            # Make API call
+            response = self.api_client.call_api([
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ], max_tokens=1800)
+            
+            if not response['success']:
+                return AnalysisResult(
+                    success=False,
+                    analysis_type="review_analysis",
+                    product_asin=product_info.get('asin', 'unknown'),
+                    product_name=product_info.get('name', 'Unknown Product'),
+                    timestamp=datetime.now().isoformat(),
+                    summary={},
+                    detailed_findings={},
+                    recommendations=[],
+                    confidence_score=0.0,
+                    data_quality=review_quality,
+                    errors=[response['error']]
+                )
+            
+            # Parse and structure the response
+            analysis_content = response['result']
+            structured_analysis = self._parse_review_analysis(analysis_content)
+            
+            # Calculate confidence score
+            confidence = self._calculate_confidence_score(review_quality, len(reviews))
+            
+            return AnalysisResult(
+                success=True,
+                analysis_type="review_analysis",
+                product_asin=product_info.get('asin', 'unknown'),
+                product_name=product_info.get('name', 'Unknown Product'),
+                timestamp=datetime.now().isoformat(),
+                summary=structured_analysis.get('summary', {}),
+                detailed_findings=structured_analysis.get('findings', {}),
+                recommendations=structured_analysis.get('recommendations', []),
+                confidence_score=confidence,
+                data_quality=review_quality
+            )
+            
+        except Exception as e:
+            logger.error(f"Error in comprehensive review analysis: {str(e)}")
+            return AnalysisResult(
+                success=False,
+                analysis_type="review_analysis",
+                product_asin=product_info.get('asin', 'unknown'),
+                product_name=product_info.get('name', 'Unknown Product'),
+                timestamp=datetime.now().isoformat(),
+                summary={},
+                detailed_findings={},
+                recommendations=[],
+                confidence_score=0.0,
+                data_quality={},
+                errors=[str(e)]
+            )
+    
+    def analyze_returns_comprehensive(self, product_info: Dict[str, Any], 
+                                    returns: List[Dict[str, Any]]) -> AnalysisResult:
+        """Comprehensive, product-specific return analysis"""
+        
+        try:
+            # Analyze data quality
+            return_quality = self.preprocessor.analyze_return_quality(returns)
+            
+            if return_quality['total'] == 0:
+                return AnalysisResult(
+                    success=False,
+                    analysis_type="return_analysis",
+                    product_asin=product_info.get('asin', 'unknown'),
+                    product_name=product_info.get('name', 'Unknown Product'),
+                    timestamp=datetime.now().isoformat(),
+                    summary={},
+                    detailed_findings={},
+                    recommendations=[],
+                    confidence_score=0.0,
+                    data_quality=return_quality,
+                    errors=["No return data available"]
+                )
+            
+            # Create targeted summary
+            return_summary = self.preprocessor._summarize_returns_smart(
+                returns, return_quality, 3000
+            )
+            
+            # Create product-specific prompt
+            system_prompt = self._create_return_system_prompt(product_info)
+            user_prompt = self._create_return_analysis_prompt(
+                product_info, return_summary, return_quality
+            )
+            
+            # Make API call
+            response = self.api_client.call_api([
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ], max_tokens=1800)
+            
+            if not response['success']:
+                return AnalysisResult(
+                    success=False,
+                    analysis_type="return_analysis",
+                    product_asin=product_info.get('asin', 'unknown'),
+                    product_name=product_info.get('name', 'Unknown Product'),
+                    timestamp=datetime.now().isoformat(),
+                    summary={},
+                    detailed_findings={},
+                    recommendations=[],
+                    confidence_score=0.0,
+                    data_quality=return_quality,
+                    errors=[response['error']]
+                )
+            
+            # Parse and structure the response
+            analysis_content = response['result']
+            structured_analysis = self._parse_return_analysis(analysis_content)
+            
+            # Calculate confidence score
+            confidence = self._calculate_confidence_score(return_quality, len(returns))
+            
+            return AnalysisResult(
+                success=True,
+                analysis_type="return_analysis",
+                product_asin=product_info.get('asin', 'unknown'),
+                product_name=product_info.get('name', 'Unknown Product'),
+                timestamp=datetime.now().isoformat(),
+                summary=structured_analysis.get('summary', {}),
+                detailed_findings=structured_analysis.get('findings', {}),
+                recommendations=structured_analysis.get('recommendations', []),
+                confidence_score=confidence,
+                data_quality=return_quality
+            )
+            
+        except Exception as e:
+            logger.error(f"Error in comprehensive return analysis: {str(e)}")
+            return AnalysisResult(
+                success=False,
+                analysis_type="return_analysis",
+                product_asin=product_info.get('asin', 'unknown'),
+                product_name=product_info.get('name', 'Unknown Product'),
+                timestamp=datetime.now().isoformat(),
+                summary={},
+                detailed_findings={},
+                recommendations=[],
+                confidence_score=0.0,
+                data_quality={},
+                errors=[str(e)]
+            )
+    
+    def generate_listing_optimization(self, product_info: Dict[str, Any], 
+                                    review_analysis: Optional[AnalysisResult] = None,
+                                    return_analysis: Optional[AnalysisResult] = None) -> AnalysisResult:
+        """Generate comprehensive listing optimization recommendations"""
+        
+        try:
+            # Create optimization prompt with all available data
+            system_prompt = self._create_optimization_system_prompt(product_info)
+            user_prompt = self._create_optimization_prompt(
+                product_info, review_analysis, return_analysis
+            )
+            
+            # Make API call
+            response = self.api_client.call_api([
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ], max_tokens=2000)
+            
+            if not response['success']:
+                return AnalysisResult(
+                    success=False,
+                    analysis_type="listing_optimization",
+                    product_asin=product_info.get('asin', 'unknown'),
+                    product_name=product_info.get('name', 'Unknown Product'),
+                    timestamp=datetime.now().isoformat(),
+                    summary={},
+                    detailed_findings={},
+                    recommendations=[],
+                    confidence_score=0.0,
+                    data_quality={},
+                    errors=[response['error']]
+                )
+            
+            # Parse optimization recommendations
+            optimization_content = response['result']
+            structured_optimization = self._parse_optimization_analysis(optimization_content)
+            
+            # Calculate confidence based on available data
+            confidence = 0.7  # Base confidence
+            if review_analysis and review_analysis.success:
+                confidence += 0.15
+            if return_analysis and return_analysis.success:
+                confidence += 0.15
+            
+            return AnalysisResult(
+                success=True,
+                analysis_type="listing_optimization",
+                product_asin=product_info.get('asin', 'unknown'),
+                product_name=product_info.get('name', 'Unknown Product'),
+                timestamp=datetime.now().isoformat(),
+                summary=structured_optimization.get('summary', {}),
+                detailed_findings=structured_optimization.get('findings', {}),
+                recommendations=structured_optimization.get('recommendations', []),
+                confidence_score=min(confidence, 1.0),
+                data_quality={"has_review_data": review_analysis is not None,
+                            "has_return_data": return_analysis is not None}
+            )
+            
+        except Exception as e:
+            logger.error(f"Error in listing optimization: {str(e)}")
+            return AnalysisResult(
+                success=False,
+                analysis_type="listing_optimization",
+                product_asin=product_info.get('asin', 'unknown'),
+                product_name=product_info.get('name', 'Unknown Product'),
+                timestamp=datetime.now().isoformat(),
+                summary={},
+                detailed_findings={},
+                recommendations=[],
+                confidence_score=0.0,
+                data_quality={},
+                errors=[str(e)]
+            )
+    
+    def _create_review_system_prompt(self, product_info: Dict[str, Any]) -> str:
+        """Create product-specific system prompt for review analysis"""
+        category = product_info.get('category', 'Medical Device')
+        return f"""You are an expert Amazon listing optimization specialist with deep expertise in {category} products.
+
+Your role is to analyze customer reviews for medical devices and provide specific, actionable insights that help listing managers:
+1. Identify specific product issues that drive negative reviews
+2. Understand what customers value most about the product
+3. Find opportunities to improve the Amazon listing
+4. Reduce return rates through better customer expectations
+
+Focus on being specific, data-driven, and actionable. Avoid generic advice."""
+    
+    def _create_review_analysis_prompt(self, product_info: Dict[str, Any], 
+                                     review_summary: str, 
+                                     quality_info: Dict[str, Any]) -> str:
+        """Create detailed prompt for review analysis"""
+        
+        return_rate = product_info.get('return_rate_30d', 'Unknown')
+        star_rating = product_info.get('star_rating', 'Unknown')
+        
+        return f"""Analyze these customer reviews for: {product_info.get('name', 'Unknown Product')}
+ASIN: {product_info.get('asin', 'Unknown')}
+Category: {product_info.get('category', 'Medical Device')}
+Current Return Rate: {return_rate}%
+Current Star Rating: {star_rating}
+
+{review_summary}
+
+Provide analysis in this EXACT format:
+
+## SUMMARY
+- Overall sentiment: [Positive/Mixed/Negative]
+- Primary satisfaction drivers: [List top 3]
+- Primary complaint categories: [List top 3]
+- Listing accuracy assessment: [Good/Fair/Poor with explanation]
+
+## KEY FINDINGS
+### Positive Feedback Themes
+[List 3-5 specific things customers love with examples]
+
+### Negative Feedback Themes  
+[List 3-5 specific issues with examples and frequency]
+
+### Quality & Durability Issues
+[Specific problems mentioned with frequency]
+
+### Sizing & Fit Issues
+[Specific sizing problems with examples]
+
+### Usage & Comfort Issues
+[Specific usability problems with examples]
+
+## IMMEDIATE ACTION ITEMS
+1. **[Priority Level] [Category]**: [Specific issue] 
+   - Action: [Specific recommendation]
+   - Expected Impact: [Specific outcome]
+
+2. **[Priority Level] [Category]**: [Specific issue]
+   - Action: [Specific recommendation] 
+   - Expected Impact: [Specific outcome]
+
+[Continue for 3-5 action items]
+
+Base your analysis on the actual review data provided. Be specific and cite examples from the reviews."""
+    
+    def _create_return_system_prompt(self, product_info: Dict[str, Any]) -> str:
+        """Create product-specific system prompt for return analysis"""
+        category = product_info.get('category', 'Medical Device')
+        return f"""You are an expert Amazon return reduction specialist focusing on {category} products.
+
+Your goal is to analyze return reasons and provide specific, implementable solutions that will:
+1. Reduce return rates through listing improvements
+2. Identify product quality issues that need addressing
+3. Improve customer expectation management
+4. Suggest specific listing changes to prevent returns
+
+Focus on root cause analysis and specific, measurable solutions."""
+    
+    def _create_return_analysis_prompt(self, product_info: Dict[str, Any], 
+                                     return_summary: str, 
+                                     quality_info: Dict[str, Any]) -> str:
+        """Create detailed prompt for return analysis"""
+        
+        return_rate = product_info.get('return_rate_30d', 'Unknown')
+        sales_30d = product_info.get('sales_30d', 'Unknown')
+        
+        return f"""Analyze return reasons for: {product_info.get('name', 'Unknown Product')}
+ASIN: {product_info.get('asin', 'Unknown')}
+Category: {product_info.get('category', 'Medical Device')}
+Current Return Rate: {return_rate}%
+30-Day Sales Volume: {sales_30d}
+
+{return_summary}
+
+Provide analysis in this EXACT format:
+
+## SUMMARY
+- Total return rate impact: [High/Medium/Low risk level]
+- Primary return driver: [Single biggest cause]
+- Preventable return percentage: [Estimate % preventable through listing changes]
+- Product quality concerns: [Yes/No with explanation]
+
+## RETURN CATEGORIZATION
+### Size/Fit Issues ({MEDICAL_ANALYSIS_KEYWORDS['sizing_fit_issues']})
+- Frequency: [Count and percentage]
+- Specific problems: [List with examples]
+- Root cause: [Why this happens]
+
+### Quality/Durability Issues  
+- Frequency: [Count and percentage]
+- Specific problems: [List with examples]
+- Severity assessment: [Minor/Major/Critical]
+
+### Expectation Mismatch
+- Frequency: [Count and percentage]
+- Specific mismatches: [What customers expected vs. reality]
+- Listing accuracy issues: [Specific problems with current listing]
+
+### Medical Efficacy Issues
+- Frequency: [Count and percentage]
+- Specific concerns: [What's not working for customers]
+- Usage instruction issues: [Any instruction problems]
+
+## RETURN REDUCTION PLAN
+### Immediate Listing Changes (0-2 weeks)
+1. **Title**: [Specific change needed]
+2. **Bullet Points**: [Specific additions/changes]
+3. **Images**: [Specific image improvements needed]
+4. **Description**: [Specific information to add]
+
+### Product Improvements (1-3 months)
+1. **Design**: [Specific product changes needed]
+2. **Quality**: [Specific quality improvements]
+3. **Packaging**: [Packaging/instruction improvements]
+
+### Expected Impact
+- Estimated return rate reduction: [Specific percentage]
+- Timeline for improvement: [Realistic timeframe]
+- Success metrics: [How to measure improvement]
+
+Focus on specific, actionable recommendations based on the actual return data provided."""
+    
+    def _create_optimization_system_prompt(self, product_info: Dict[str, Any]) -> str:
+        """Create system prompt for listing optimization"""
+        category = product_info.get('category', 'Medical Device')
+        return f"""You are an expert Amazon listing optimization specialist for {category} products with a track record of increasing conversion rates and reducing return rates.
+
+Your expertise includes:
+- Amazon SEO and keyword optimization
+- Medical device marketing and compliance
+- Customer psychology and purchase decision factors
+- Image optimization and visual storytelling
+- A+ Content strategy
+
+Provide specific, implementable recommendations that will improve sales conversion and reduce returns."""
+    
+    def _create_optimization_prompt(self, product_info: Dict[str, Any], 
+                                  review_analysis: Optional[AnalysisResult] = None,
+                                  return_analysis: Optional[AnalysisResult] = None) -> str:
+        """Create comprehensive optimization prompt"""
+        
+        # Build context from analysis
+        context_sections = []
+        
+        if review_analysis and review_analysis.success:
+            context_sections.append(f"REVIEW INSIGHTS:\n{review_analysis.summary}")
+        
+        if return_analysis and return_analysis.success:
+            context_sections.append(f"RETURN INSIGHTS:\n{return_analysis.summary}")
+        
+        context = "\n\n".join(context_sections) if context_sections else "No review or return analysis available."
+        
+        return f"""Optimize the Amazon listing for: {product_info.get('name', 'Unknown Product')}
+ASIN: {product_info.get('asin', 'Unknown')}
+Category: {product_info.get('category', 'Medical Device')}
+Current Return Rate: {product_info.get('return_rate_30d', 'Unknown')}%
+Current Star Rating: {product_info.get('star_rating', 'Unknown')}
+Description: {product_info.get('description', 'No description available')}
+
+{context}
+
+Provide optimization recommendations in this EXACT format:
+
+## LISTING OPTIMIZATION STRATEGY
+
+### Title Optimization
+- Current issues: [Problems with current title if known]
+- Recommended title structure: [Specific format]
+- Priority keywords: [5-7 most important terms]
+- Character optimization: [How to maximize 200-character limit]
+
+### Bullet Point Strategy
+- Key benefit #1: [Specific benefit with customer pain point it solves]
+- Key benefit #2: [Specific benefit with customer pain point it solves]  
+- Key benefit #3: [Specific benefit with customer pain point it solves]
+- Key benefit #4: [Specific benefit with customer pain point it solves]
+- Key benefit #5: [Specific benefit with customer pain point it solves]
+
+### Image Optimization Plan
+1. **Main image**: [Specific requirements]
+2. **Feature highlight**: [What to showcase]
+3. **Size reference**: [How to show scale]
+4. **Lifestyle shot**: [Specific usage scenario]
+5. **Comparison chart**: [What to compare]
+6. **Infographic**: [Key information to visualize]
+7. **Packaging shot**: [What customer receives]
+
+### Description Enhancement
+- Opening hook: [Compelling first sentence]
+- Problem-solution narrative: [Specific customer problem this solves]
+- Key differentiators: [What makes this better than competitors]
+- Trust signals: [Certifications, guarantees, etc.]
+- Usage instructions: [Clear how-to information]
+
+### Keyword Strategy
+- Primary keywords: [Most important search terms]
+- Secondary keywords: [Supporting search terms]
+- Long-tail keywords: [Specific phrases customers use]
+- Backend keywords: [For Amazon search term field]
+
+### Conversion Optimization
+- Price positioning: [How to present value]
+- Social proof elements: [Reviews, testimonials to highlight]
+- Urgency/scarcity tactics: [If appropriate]
+- Trust building elements: [Guarantees, certifications]
+
+## IMPLEMENTATION PRIORITY
+### Week 1 (Quick Wins)
+1. [Specific action item]
+2. [Specific action item]
+3. [Specific action item]
+
+### Week 2-4 (Major Changes)  
+1. [Specific action item]
+2. [Specific action item]
+3. [Specific action item]
+
+### Month 2+ (Advanced Optimization)
+1. [Specific action item]
+2. [Specific action item]
+
+## SUCCESS METRICS
+- Target conversion rate improvement: [Specific percentage]
+- Target return rate reduction: [Specific percentage]  
+- Timeline for results: [Realistic expectations]
+- Key performance indicators: [What to track]
+
+Base all recommendations on the product category, customer feedback data provided, and Amazon best practices for medical devices."""
+    
+    def _calculate_confidence_score(self, quality_info: Dict[str, Any], 
+                                  data_count: int) -> float:
+        """Calculate confidence score based on data quality and quantity"""
+        
+        base_score = 0.5
+        
+        # Data quantity factor
+        if data_count >= 50:
+            quantity_bonus = 0.3
+        elif data_count >= 20:
+            quantity_bonus = 0.2
+        elif data_count >= 10:
+            quantity_bonus = 0.1
+        else:
+            quantity_bonus = 0.0
+        
+        # Data quality factor
+        quality = quality_info.get('quality', 'low')
+        if quality == 'high':
+            quality_bonus = 0.2
+        elif quality == 'medium':
+            quality_bonus = 0.1
+        else:
+            quality_bonus = 0.0
+        
+        return min(base_score + quantity_bonus + quality_bonus, 1.0)
+    
+    def _parse_review_analysis(self, content: str) -> Dict[str, Any]:
+        """Parse structured review analysis response"""
+        
+        sections = {
+            'summary': {},
+            'findings': {},
+            'recommendations': []
+        }
+        
+        try:
+            # Extract summary section
+            summary_match = re.search(r'## SUMMARY\s*\n(.*?)(?=## |$)', content, re.DOTALL)
+            if summary_match:
+                summary_text = summary_match.group(1)
+                sections['summary'] = self._parse_summary_section(summary_text)
+            
+            # Extract findings
+            findings_match = re.search(r'## KEY FINDINGS\s*\n(.*?)(?=## |$)', content, re.DOTALL)
+            if findings_match:
+                findings_text = findings_match.group(1)
+                sections['findings'] = self._parse_findings_section(findings_text)
+            
+            # Extract action items
+            actions_match = re.search(r'## IMMEDIATE ACTION ITEMS\s*\n(.*?)(?=## |$)', content, re.DOTALL)
+            if actions_match:
+                actions_text = actions_match.group(1)
+                sections['recommendations'] = self._parse_action_items(actions_text)
+        
+        except Exception as e:
+            logger.error(f"Error parsing review analysis: {str(e)}")
+        
+        return sections
+    
+    def _parse_return_analysis(self, content: str) -> Dict[str, Any]:
+        """Parse structured return analysis response"""
+        
+        sections = {
+            'summary': {},
+            'findings': {},
+            'recommendations': []
+        }
+        
+        try:
+            # Extract summary
+            summary_match = re.search(r'## SUMMARY\s*\n(.*?)(?=## |$)', content, re.DOTALL)
+            if summary_match:
+                summary_text = summary_match.group(1)
+                sections['summary'] = self._parse_summary_section(summary_text)
+            
+            # Extract categorization
+            cat_match = re.search(r'## RETURN CATEGORIZATION\s*\n(.*?)(?=## |$)', content, re.DOTALL)
+            if cat_match:
+                cat_text = cat_match.group(1)
+                sections['findings']['categorization'] = cat_text
+            
+            # Extract reduction plan
+            plan_match = re.search(r'## RETURN REDUCTION PLAN\s*\n(.*?)(?=## |$)', content, re.DOTALL)
+            if plan_match:
+                plan_text = plan_match.group(1)
+                sections['recommendations'] = self._parse_reduction_plan(plan_text)
+        
+        except Exception as e:
+            logger.error(f"Error parsing return analysis: {str(e)}")
+        
+        return sections
+    
+    def _parse_optimization_analysis(self, content: str) -> Dict[str, Any]:
+        """Parse structured optimization response"""
+        
+        sections = {
+            'summary': {},
+            'findings': {},
+            'recommendations': []
+        }
+        
+        try:
+            # Extract optimization strategy
+            strategy_match = re.search(r'## LISTING OPTIMIZATION STRATEGY\s*\n(.*?)(?=## |$)', content, re.DOTALL)
+            if strategy_match:
+                strategy_text = strategy_match.group(1)
+                sections['findings']['strategy'] = strategy_text
+            
+            # Extract implementation plan
+            impl_match = re.search(r'## IMPLEMENTATION PRIORITY\s*\n(.*?)(?=## |$)', content, re.DOTALL)
+            if impl_match:
+                impl_text = impl_match.group(1)
+                sections['recommendations'] = self._parse_implementation_plan(impl_text)
+            
+            # Extract success metrics
+            metrics_match = re.search(r'## SUCCESS METRICS\s*\n(.*?)(?=## |$)', content, re.DOTALL)
+            if metrics_match:
+                metrics_text = metrics_match.group(1)
+                sections['summary']['success_metrics'] = metrics_text
+        
+        except Exception as e:
+            logger.error(f"Error parsing optimization analysis: {str(e)}")
+        
+        return sections
+    
+    def _parse_summary_section(self, text: str) -> Dict[str, str]:
+        """Parse summary bullet points"""
+        summary = {}
+        lines = text.strip().split('\n')
+        
+        for line in lines:
+            if ':' in line:
+                key, value = line.split(':', 1)
+                key = key.strip(' -•').lower().replace(' ', '_')
+                value = value.strip()
+                summary[key] = value
+        
+        return summary
+    
+    def _parse_findings_section(self, text: str) -> Dict[str, str]:
+        """Parse findings sections"""
+        findings = {}
+        current_section = None
+        
+        lines = text.strip().split('\n')
+        for line in lines:
+            if line.startswith('###'):
+                current_section = line.replace('#', '').strip().lower().replace(' ', '_')
+                findings[current_section] = ""
+            elif current_section and line.strip():
+                findings[current_section] += line.strip() + "\n"
+        
+        return findings
+    
+    def _parse_action_items(self, text: str) -> List[Dict[str, str]]:
+        """Parse action items into structured format"""
+        recommendations = []
+        
+        # Look for numbered items
+        items = re.findall(r'\d+\.\s*\*\*(.*?)\*\*:\s*(.*?)(?=\n\s*-|\n\d+\.|\n\n|$)', text, re.DOTALL)
+        
+        for priority_category, description in items:
+            # Parse priority and category
+            if '][' in priority_category:
+                priority, category = priority_category.split('][', 1)
+                priority = priority.strip('[]')
+                category = category.strip('[]')
+            else:
+                priority = "Medium"
+                category = priority_category
+            
+            # Extract action and impact
+            parts = description.split('\n')
+            action = ""
+            impact = ""
+            
+            for part in parts:
+                part = part.strip()
+                if part.startswith('- Action:'):
+                    action = part.replace('- Action:', '').strip()
+                elif part.startswith('- Expected Impact:'):
+                    impact = part.replace('- Expected Impact:', '').strip()
+            
+            recommendations.append({
+                'priority': priority,
+                'category': category,
+                'action': action,
+                'expected_impact': impact
+            })
+        
+        return recommendations
+    
+    def _parse_reduction_plan(self, text: str) -> List[Dict[str, str]]:
+        """Parse return reduction plan"""
+        recommendations = []
+        
+        # Extract sections
+        sections = re.findall(r'### (.*?)\n(.*?)(?=### |$)', text, re.DOTALL)
+        
+        for section_name, section_content in sections:
+            items = re.findall(r'\d+\.\s*\*\*(.*?)\*\*:\s*(.*?)(?=\n\d+\.|\n\n|$)', section_content, re.DOTALL)
+            
+            for item_name, item_description in items:
+                recommendations.append({
+                    'category': section_name.strip(),
+                    'priority': 'High' if 'Immediate' in section_name else 'Medium',
+                    'action': f"{item_name}: {item_description.strip()}",
+                    'expected_impact': 'Return rate reduction'
+                })
+        
+        return recommendations
+    
+    def _parse_implementation_plan(self, text: str) -> List[Dict[str, str]]:
+        """Parse implementation priority plan"""
+        recommendations = []
+        
+        # Extract time-based sections
+        sections = re.findall(r'### (.*?)\n(.*?)(?=### |$)', text, re.DOTALL)
+        
+        for timeframe, section_content in sections:
+            items = re.findall(r'\d+\.\s*(.*?)(?=\n\d+\.|\n\n|$)', section_content, re.DOTALL)
+            
+            for item in items:
+                recommendations.append({
+                    'category': 'Listing Optimization',
+                    'priority': 'High' if 'Week 1' in timeframe else 'Medium',
+                    'action': item.strip(),
+                    'timeframe': timeframe.strip(),
+                    'expected_impact': 'Conversion improvement'
+                })
+        
+        return recommendations
+
+# Main Enhanced AI Analysis Class
+class EnhancedAIAnalyzer:
+    """Main class coordinating all AI analysis functionality"""
+    
+    def __init__(self):
+        self.api_client = APIClient()
+        self.analyzer = ProductSpecificAnalyzer(self.api_client)
+        self.preprocessor = DataPreprocessor()
+    
+    def get_api_status(self) -> Dict[str, Any]:
+        """Check API availability and status"""
+        if not self.api_client.api_key:
+            return {
+                'available': False,
+                'error': 'API key not configured',
+                'suggestions': [
+                    'Add OPENAI_API_KEY to environment variables',
+                    'Add openai_api_key to Streamlit secrets'
+                ]
+            }
+        
+        # Test API with minimal call
+        test_response = self.api_client.call_api([
+            {"role": "user", "content": "Test"}
+        ], max_tokens=10)
+        
+        return {
+            'available': test_response['success'],
+            'error': test_response.get('error'),
+            'model': test_response.get('model', 'gpt-4o')
+        }
+    
+    def analyze_product_comprehensive(self, product_info: Dict[str, Any],
+                                    reviews: List[Dict[str, Any]] = None,
+                                    returns: List[Dict[str, Any]] = None) -> Dict[str, AnalysisResult]:
+        """Run comprehensive analysis for a product"""
+        
+        results = {}
+        
+        # Review analysis
+        if reviews:
+            logger.info(f"Starting review analysis for {product_info.get('name', 'Unknown')}")
+            results['review_analysis'] = self.analyzer.analyze_reviews_comprehensive(
+                product_info, reviews
+            )
+        
+        # Return analysis
+        if returns:
+            logger.info(f"Starting return analysis for {product_info.get('name', 'Unknown')}")
+            results['return_analysis'] = self.analyzer.analyze_returns_comprehensive(
+                product_info, returns
+            )
+        
+        # Listing optimization
+        logger.info(f"Starting listing optimization for {product_info.get('name', 'Unknown')}")
+        results['listing_optimization'] = self.analyzer.generate_listing_optimization(
+            product_info, 
+            results.get('review_analysis'),
+            results.get('return_analysis')
         )
         
-        if response.status_code == 200:
-            logger.info("OpenAI API call successful")
-            return response.json()["choices"][0]["message"]["content"]
-        else:
-            logger.error(f"API error: {response.status_code} - {response.text}")
-            return None
-            
-    except Exception as e:
-        logger.error(f"Error calling OpenAI API: {str(e)}")
-        return None
-
-def analyze_reviews_with_ai(reviews):
-    """
-    Analyze a list of product reviews using AI
+        return results
     
-    Parameters:
-    - reviews: List of dictionaries containing review data
-    
-    Returns:
-    - Dictionary with analysis results
-    """
-    try:
-        # Prepare review text
-        review_texts = []
-        for review in reviews[:20]:  # Limit to 20 reviews to avoid token limits
-            rating = review.get('rating', 'Unknown')
-            text = review.get('review_text', '')
-            review_texts.append(f"Rating: {rating} - {text}")
+    def export_analysis_results(self, results: Dict[str, AnalysisResult]) -> Dict[str, Any]:
+        """Export analysis results in structured format"""
         
-        review_content = "\n\n".join(review_texts)
-        
-        # Create the prompt for the AI
-        system_prompt = "You are an expert Amazon listing optimization specialist who helps medical device companies maximize their e-commerce sales and minimize returns."
-        user_prompt = f"""Analyze the following Amazon medical device reviews. 
-        Identify key issues, patterns, and insights related to:
-        1. Overall customer sentiment
-        2. Product quality and durability concerns
-        3. Fit, comfort and usability issues
-        4. Listing accuracy (how well the listing matched the actual product)
-        5. Features customers liked most
-        6. Features customers disliked most
-        7. Common questions or confusion points
-        
-        For each category, provide specific examples from the reviews.
-        Then provide an overall assessment of how the listing could be improved based on this feedback.
-        
-        Reviews:
-        {review_content}
-        """
-        
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ]
-        
-        # Call the OpenAI API
-        analysis = call_openai_api(messages)
-        
-        if not analysis:
-            return {"success": False, "error": "Failed to get API response"}
-        
-        # Extract themes and issues from the analysis
-        sentiment = extract_theme_from_analysis(analysis, "Overall customer sentiment")
-        quality_issues = extract_theme_from_analysis(analysis, "Product quality and durability concerns")
-        fit_issues = extract_theme_from_analysis(analysis, "Fit, comfort and usability issues")
-        listing_accuracy = extract_theme_from_analysis(analysis, "Listing accuracy")
-        liked_features = extract_theme_from_analysis(analysis, "Features customers liked most")
-        disliked_features = extract_theme_from_analysis(analysis, "Features customers disliked most")
-        confusion_points = extract_theme_from_analysis(analysis, "Common questions or confusion points")
-        
-        return {
-            "success": True,
-            "full_analysis": analysis,
-            "themes": {
-                "sentiment": sentiment,
-                "quality_issues": quality_issues,
-                "fit_issues": fit_issues,
-                "listing_accuracy": listing_accuracy,
-                "liked_features": liked_features,
-                "disliked_features": disliked_features,
-                "confusion_points": confusion_points
-            }
+        export_data = {
+            'timestamp': datetime.now().isoformat(),
+            'analyses': {}
         }
-    except Exception as e:
-        logger.error(f"Error in AI review analysis: {str(e)}")
-        return {"success": False, "error": str(e)}
+        
+        for analysis_type, result in results.items():
+            if result.success:
+                export_data['analyses'][analysis_type] = result.to_dict()
+        
+        return export_data
 
-def extract_theme_from_analysis(analysis_text, theme_name):
-    """
-    Extract specific theme sections from the AI analysis text
-    
-    Parameters:
-    - analysis_text: The full text of the AI analysis
-    - theme_name: The name of the theme to extract
-    
-    Returns:
-    - Extracted text for the theme or None if not found
-    """
-    # Look for sections that begin with the theme name
-    pattern = rf"{theme_name}:?(.*?)(?:\n\d+\.|$)"
-    match = re.search(pattern, analysis_text, re.DOTALL | re.IGNORECASE)
-    
-    if match:
-        return match.group(1).strip()
-    return None
-
-def analyze_returns_with_ai(return_reasons):
-    """
-    Analyze a list of return reasons using AI
-    
-    Parameters:
-    - return_reasons: List of return reason strings
-    
-    Returns:
-    - Dictionary with analysis results
-    """
-    try:
-        # Prepare return reason text
-        return_text = "\n".join([f"- {reason}" for reason in return_reasons[:30]])  # Limit to 30 returns
-        
-        # Create the prompt for the AI
-        system_prompt = "You are an expert Amazon listing optimization specialist who helps medical device companies maximize their e-commerce sales and minimize returns."
-        user_prompt = f"""Analyze the following return reasons for an Amazon medical device product.
-        Categorize the returns into these groups:
-        1. Product defects/quality issues
-        2. Size/fit issues
-        3. Comfort issues
-        4. Performance/efficacy issues
-        5. Listing accuracy problems (images, description)
-        6. Preference/expectation mismatch
-        7. User error or misunderstanding
-        
-        For each category, provide the count and percentage of returns, with specific examples.
-        Then provide specific recommendations for how to improve the product listing to reduce these types of returns.
-        
-        Return Reasons:
-        {return_text}
-        """
-        
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ]
-        
-        # Call the OpenAI API
-        analysis = call_openai_api(messages)
-        
-        if not analysis:
-            return {"success": False, "error": "Failed to get API response"}
-        
-        # Extract categories from the analysis
-        defect_issues = extract_theme_from_analysis(analysis, "Product defects/quality issues")
-        size_issues = extract_theme_from_analysis(analysis, "Size/fit issues")
-        comfort_issues = extract_theme_from_analysis(analysis, "Comfort issues")
-        performance_issues = extract_theme_from_analysis(analysis, "Performance/efficacy issues")
-        listing_issues = extract_theme_from_analysis(analysis, "Listing accuracy problems")
-        expectation_issues = extract_theme_from_analysis(analysis, "Preference/expectation mismatch")
-        user_error = extract_theme_from_analysis(analysis, "User error or misunderstanding")
-        
-        return {
-            "success": True,
-            "full_analysis": analysis,
-            "categories": {
-                "defects": defect_issues,
-                "size": size_issues,
-                "comfort": comfort_issues,
-                "performance": performance_issues,
-                "listing_accuracy": listing_issues,
-                "expectations": expectation_issues,
-                "user_error": user_error
-            }
-        }
-    except Exception as e:
-        logger.error(f"Error in return reason analysis: {str(e)}")
-        return {"success": False, "error": str(e)}
-
-def analyze_listing_optimization(product_info):
-    """
-    Analyze and provide recommendations for Amazon listing optimization
-    
-    Parameters:
-    - product_info: Dictionary with product details
-    
-    Returns:
-    - Dictionary with optimization recommendations
-    """
-    try:
-        # Create the prompt for the AI
-        system_prompt = "You are an expert Amazon listing optimization specialist who helps medical device companies maximize their e-commerce sales and minimize returns."
-        user_prompt = f"""Analyze this Amazon medical device product and provide actionable 
-        recommendations to optimize the listing for higher conversion rates and reduced returns.
-        
-        Product name: {product_info.get('name', 'Unknown')}
-        Category: {product_info.get('category', 'Medical Device')}
-        Description: {product_info.get('description', '')}
-        30-Day Return Rate: {product_info.get('return_rate_30d', 'N/A')}%
-        Star Rating: {product_info.get('star_rating', 'N/A')}
-        
-        Provide the following:
-        1. Title optimization recommendations (for better CTR and keyword relevance)
-        2. Bullet points strategy (highlight key benefits and features)
-        3. Description improvements (storytelling and problem-solution format)
-        4. Image optimization suggestions (specific shots and demonstrations needed)
-        5. Keywords to target for this specific medical device
-        6. A+ Content recommendations (if applicable)
-        7. Common customer questions to address proactively
-        """
-        
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ]
-        
-        # Call the OpenAI API
-        analysis = call_openai_api(messages, max_tokens=1200)
-        
-        if not analysis:
-            return {"success": False, "error": "Failed to get API response"}
-        
-        # Extract sections from the analysis
-        title_recommendations = extract_theme_from_analysis(analysis, "Title optimization recommendations")
-        bullet_strategy = extract_theme_from_analysis(analysis, "Bullet points strategy")
-        description_improvements = extract_theme_from_analysis(analysis, "Description improvements")
-        image_suggestions = extract_theme_from_analysis(analysis, "Image optimization suggestions")
-        keywords = extract_theme_from_analysis(analysis, "Keywords to target")
-        a_plus_recommendations = extract_theme_from_analysis(analysis, "A+ Content recommendations")
-        common_questions = extract_theme_from_analysis(analysis, "Common customer questions")
-        
-        return {
-            "success": True,
-            "full_analysis": analysis,
-            "sections": {
-                "title_recommendations": title_recommendations,
-                "bullet_strategy": bullet_strategy,
-                "description_improvements": description_improvements,
-                "image_suggestions": image_suggestions,
-                "keywords": keywords,
-                "a_plus_recommendations": a_plus_recommendations,
-                "common_questions": common_questions
-            }
-        }
-    except Exception as e:
-        logger.error(f"Error in listing optimization analysis: {str(e)}")
-        return {"success": False, "error": str(e)}
-
-def generate_improvement_recommendations(product_info, reviews_data, returns_data, sales_data=None):
-    """
-    Generate AI-powered recommendations for product improvements
-    
-    Parameters:
-    - product_info: Dictionary with product details
-    - reviews_data: List of review dictionaries
-    - returns_data: List of return reason dictionaries
-    - sales_data: Optional sales and returns metrics
-    
-    Returns:
-    - Dictionary with recommendations
-    """
-    try:
-        # Prepare review text
-        review_texts = []
-        for review in reviews_data[:15]:  # Limit to 15 reviews
-            rating = review.get('rating', 'Unknown')
-            text = review.get('review_text', '')
-            review_texts.append(f"Rating: {rating} - {text}")
-        
-        review_content = "\n".join(review_texts)
-        
-        # Prepare return reason text
-        return_reasons = []
-        for ret in returns_data[:15]:  # Limit to 15 return reasons
-            reason = ret.get('return_reason', '')
-            return_reasons.append(f"- {reason}")
-        
-        return_content = "\n".join(return_reasons)
-        
-        # Calculate return rate
-        return_rate = None
-        if sales_data:
-            sales = sales_data.get('sales_30d', 0)
-            returns = sales_data.get('returns_30d', 0)
-            if sales > 0:
-                return_rate = (returns / sales) * 100
-        
-        # Create the prompt for the AI
-        system_prompt = "You are an expert Amazon listing optimization specialist who helps medical device companies maximize their e-commerce sales and minimize returns."
-        user_prompt = f"""As an Amazon listing optimization specialist for medical devices, analyze the following 
-        product data and provide actionable recommendations:
-        
-        Product: {product_info.get('name', 'Unknown')}
-        Category: {product_info.get('category', 'Medical Device')}
-        """
-        
-        if return_rate is not None:
-            user_prompt += f"Return Rate: {return_rate:.2f}%\n"
-        
-        user_prompt += f"""
-        Customer Reviews:
-        {review_content}
-        
-        Return Reasons:
-        {return_content}
-        
-        Please provide:
-        1. Top 3-5 product improvement recommendations based on customer feedback
-        2. Specific listing improvements to reduce return rate
-        3. New or improved image recommendations based on customer confusion
-        4. Keywords and features to emphasize based on positive reviews
-        5. Features that need better explanation in the listing
-        6. Competitive differentiators to highlight more prominently
-        
-        For each recommendation, include specific actionable steps for implementation.
-        """
-        
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ]
-        
-        # Call the OpenAI API
-        recommendations = call_openai_api(messages, max_tokens=1200, temperature=0.2)
-        
-        if not recommendations:
-            return {"success": False, "error": "Failed to get API response"}
-        
-        # Extract sections from the recommendations
-        product_improvements = extract_theme_from_analysis(recommendations, "Top 3-5 product improvement recommendations")
-        listing_improvements = extract_theme_from_analysis(recommendations, "Specific listing improvements to reduce return rate")
-        image_recommendations = extract_theme_from_analysis(recommendations, "New or improved image recommendations")
-        positive_keywords = extract_theme_from_analysis(recommendations, "Keywords and features to emphasize")
-        explanation_needs = extract_theme_from_analysis(recommendations, "Features that need better explanation")
-        competitive_differentiators = extract_theme_from_analysis(recommendations, "Competitive differentiators")
-        
-        return {
-            "success": True,
-            "full_recommendations": recommendations,
-            "sections": {
-                "product_improvements": product_improvements,
-                "listing_improvements": listing_improvements,
-                "image_recommendations": image_recommendations,
-                "positive_keywords": positive_keywords,
-                "explanation_needs": explanation_needs,
-                "competitive_differentiators": competitive_differentiators
-            }
-        }
-    except Exception as e:
-        logger.error(f"Error generating recommendations: {str(e)}")
-        return {"success": False, "error": str(e)}
-
-def analyze_competitive_positioning(product_info, competitors_data):
-    """
-    Analyze competitive positioning and provide recommendations
-    
-    Parameters:
-    - product_info: Dictionary with product details
-    - competitors_data: List of competitor dictionaries
-    
-    Returns:
-    - Dictionary with competitive analysis
-    """
-    try:
-        # Prepare competitor text
-        competitor_text = "\n".join([f"- {comp.get('name', '')} (ASIN: {comp.get('asin', 'Unknown')})" 
-                                    for comp in competitors_data[:10]])  # Limit to 10 competitors
-        
-        # Create the prompt for the AI
-        system_prompt = "You are an expert Amazon marketplace strategist specializing in competitive analysis and differentiation for medical device products."
-        user_prompt = f"""Perform a competitive analysis for this Amazon medical device and its competitors:
-        
-        Your Product: {product_info.get('name', 'Unknown')} (ASIN: {product_info.get('asin', 'Unknown')})
-        Category: {product_info.get('category', 'Medical Device')}
-        
-        Competitors:
-        {competitor_text}
-        
-        Provide the following analysis:
-        1. Competitive positioning strategy
-        2. Key differentiators to highlight in your listing
-        3. Price positioning recommendations
-        4. Feature comparison strategy
-        5. Unique selling propositions to emphasize
-        6. Weaknesses of competitors to address
-        7. Customer pain points competitors aren't solving
-        
-        Focus on how to optimize the Amazon listing to stand out from these specific competitors.
-        """
-        
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ]
-        
-        # Call the OpenAI API
-        analysis = call_openai_api(messages, max_tokens=1200, temperature=0.2)
-        
-        if not analysis:
-            return {"success": False, "error": "Failed to get API response"}
-        
-        # Extract sections from the analysis
-        positioning = extract_theme_from_analysis(analysis, "Competitive positioning strategy")
-        differentiators = extract_theme_from_analysis(analysis, "Key differentiators")
-        price_positioning = extract_theme_from_analysis(analysis, "Price positioning")
-        feature_comparison = extract_theme_from_analysis(analysis, "Feature comparison strategy")
-        selling_propositions = extract_theme_from_analysis(analysis, "Unique selling propositions")
-        competitor_weaknesses = extract_theme_from_analysis(analysis, "Weaknesses of competitors")
-        pain_points = extract_theme_from_analysis(analysis, "Customer pain points")
-        
-        return {
-            "success": True,
-            "full_analysis": analysis,
-            "sections": {
-                "positioning": positioning,
-                "differentiators": differentiators,
-                "price_positioning": price_positioning,
-                "feature_comparison": feature_comparison,
-                "selling_propositions": selling_propositions,
-                "competitor_weaknesses": competitor_weaknesses,
-                "pain_points": pain_points
-            }
-        }
-    except Exception as e:
-        logger.error(f"Error in competitive analysis: {str(e)}")
-        return {"success": False, "error": str(e)}
-
-def generate_title_optimization(product_info, current_title=""):
-    """
-    Generate an optimized Amazon product title
-    
-    Parameters:
-    - product_info: Dictionary with product details
-    - current_title: Current product title if available
-    
-    Returns:
-    - Dictionary with optimized title
-    """
-    try:
-        # Create the prompt for the AI
-        system_prompt = "You are an expert Amazon listing optimization specialist for medical devices."
-        user_prompt = f"""Create an optimized Amazon title for this medical device product:
-        
-        Product: {product_info.get('name', 'Unknown')}
-        Category: {product_info.get('category', 'Medical Device')}
-        Current Title: {current_title}
-        
-        Follow Amazon's best practices:
-        - Maximum 200 characters
-        - Include key search terms
-        - Format: Brand + Model + Type + Key Features/Benefits
-        - No promotional language like "best" or "top-rated"
-        - No special characters beyond basic punctuation
-        
-        Provide just the optimized title text.
-        """
-        
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ]
-        
-        # Call the OpenAI API
-        optimized_title = call_openai_api(messages, max_tokens=200, temperature=0.2)
-        
-        if not optimized_title:
-            return {"success": False, "error": "Failed to get API response"}
-        
-        # Clean up the title (remove quotes if present, etc.)
-        optimized_title = optimized_title.strip('"\'')
-        
-        return {
-            "success": True,
-            "optimized_title": optimized_title,
-            "character_count": len(optimized_title)
-        }
-    except Exception as e:
-        logger.error(f"Error generating optimized title: {str(e)}")
-        return {"success": False, "error": str(e)}
-
-def generate_bullet_points(product_info, current_bullets=None):
-    """
-    Generate optimized bullet points for Amazon listing
-    
-    Parameters:
-    - product_info: Dictionary with product details
-    - current_bullets: List of current bullet points if available
-    
-    Returns:
-    - Dictionary with optimized bullet points
-    """
-    try:
-        # Format current bullets if provided
-        current_bullets_text = ""
-        if current_bullets and isinstance(current_bullets, list):
-            current_bullets_text = "\n".join([f"- {bullet}" for bullet in current_bullets])
-        
-        # Create the prompt for the AI
-        system_prompt = "You are an expert Amazon listing optimization specialist for medical devices."
-        user_prompt = f"""Create 5 optimized bullet points for this Amazon medical device listing:
-        
-        Product: {product_info.get('name', 'Unknown')}
-        Category: {product_info.get('category', 'Medical Device')}
-        Description: {product_info.get('description', '')}
-        
-        Current Bullet Points:
-        {current_bullets_text if current_bullets_text else "None provided"}
-        
-        Follow Amazon's best practices:
-        - Focus on benefits, not just features
-        - Address customer pain points and questions
-        - Include relevant keywords
-        - Start with capital letters
-        - Keep each point under 200 characters
-        - Format as complete sentences
-        - No promotional language like "best" or "top-rated"
-        
-        Include one bullet point specifically addressing quality/durability and one addressing comfort/ease of use.
-        
-        Provide 5 bullet points formatted with a dash at the beginning of each line.
-        """
-        
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ]
-        
-        # Call the OpenAI API
-        bullet_points_text = call_openai_api(messages, max_tokens=500, temperature=0.2)
-        
-        if not bullet_points_text:
-            return {"success": False, "error": "Failed to get API response"}
-        
-        # Extract bullet points from the response
-        bullet_pattern = r"[-•]\s*(.+)"
-        matches = re.findall(bullet_pattern, bullet_points_text)
-        
-        # If no matches found, try splitting by newlines
-        if not matches:
-            bullet_points = [line.strip() for line in bullet_points_text.split('\n') if line.strip()]
-        else:
-            bullet_points = [match.strip() for match in matches]
-        
-        return {
-            "success": True,
-            "bullet_points": bullet_points,
-            "count": len(bullet_points)
-        }
-    except Exception as e:
-        logger.error(f"Error generating bullet points: {str(e)}")
-        return {"success": False, "error": str(e)}
-
-def generate_product_description(product_info, current_description=""):
-    """
-    Generate an optimized product description for Amazon listing
-    
-    Parameters:
-    - product_info: Dictionary with product details
-    - current_description: Current product description if available
-    
-    Returns:
-    - Dictionary with optimized description
-    """
-    try:
-        # Create the prompt for the AI
-        system_prompt = "You are an expert Amazon listing optimization specialist for medical devices."
-        user_prompt = f"""Create an optimized Amazon product description for this medical device:
-        
-        Product: {product_info.get('name', 'Unknown')}
-        Category: {product_info.get('category', 'Medical Device')}
-        Current Description: {current_description}
-        
-        Follow Amazon's best practices:
-        - Write in HTML format with paragraph tags (<p>) and line breaks
-        - Expand on features and benefits beyond the bullet points
-        - Include keywords naturally throughout the text
-        - Address potential customer questions and objections
-        - Describe specific use cases and scenarios
-        - Highlight quality, comfort, ease of use, and durability
-        - Avoid excessive capitalization and promotional language
-        
-        The description should be 3-5 paragraphs and include HTML formatting.
-        """
-        
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ]
-        
-        # Call the OpenAI API
-        description = call_openai_api(messages, max_tokens=800, temperature=0.2)
-        
-        if not description:
-            return {"success": False, "error": "Failed to get API response"}
-        
-        return {
-            "success": True,
-            "description": description,
-            "html_formatted": "<p>" in description.lower(),
-            "character_count": len(description)
-        }
-    except Exception as e:
-        logger.error(f"Error generating product description: {str(e)}")
-        return {"success": False, "error": str(e)}
-
-def generate_keywords(product_info):
-    """
-    Generate keyword recommendations for Amazon listing
-    
-    Parameters:
-    - product_info: Dictionary with product details
-    
-    Returns:
-    - Dictionary with keyword recommendations
-    """
-    try:
-        # Create the prompt for the AI
-        system_prompt = "You are an expert Amazon SEO specialist for medical devices with deep knowledge of search patterns and keyword optimization."
-        user_prompt = f"""Generate keyword recommendations for this Amazon medical device listing:
-        
-        Product: {product_info.get('name', 'Unknown')}
-        Category: {product_info.get('category', 'Medical Device')}
-        Description: {product_info.get('description', '')}
-        
-        Please provide:
-        1. Primary keywords (5-7 most important search terms)
-        2. Secondary keywords (8-10 additional relevant terms)
-        3. Long-tail keyword phrases (5-7 specific search phrases)
-        4. Backend keywords (for Amazon backend search terms field)
-        5. Competitor keywords (terms used by top competitors)
-        
-        Focus on medical terminology, symptoms, conditions, and use cases relevant to this product.
-        """
-        
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ]
-        
-        # Call the OpenAI API
-        keyword_analysis = call_openai_api(messages, max_tokens=800, temperature=0.2)
-        
-        if not keyword_analysis:
-            return {"success": False, "error": "Failed to get API response"}
-        
-        # Extract sections
-        primary_keywords = extract_theme_from_analysis(keyword_analysis, "Primary keywords")
-        secondary_keywords = extract_theme_from_analysis(keyword_analysis, "Secondary keywords")
-        long_tail = extract_theme_from_analysis(keyword_analysis, "Long-tail keyword phrases")
-        backend_keywords = extract_theme_from_analysis(keyword_analysis, "Backend keywords")
-        competitor_keywords = extract_theme_from_analysis(keyword_analysis, "Competitor keywords")
-        
-        return {
-            "success": True,
-            "full_analysis": keyword_analysis,
-            "sections": {
-                "primary_keywords": primary_keywords,
-                "secondary_keywords": secondary_keywords,
-                "long_tail": long_tail,
-                "backend_keywords": backend_keywords,
-                "competitor_keywords": competitor_keywords
-            }
-        }
-    except Exception as e:
-        logger.error(f"Error generating keywords: {str(e)}")
-        return {"success": False, "error": str(e)}
-
-def generate_image_recommendations(product_info):
-    """
-    Generate image recommendations for Amazon listing
-    
-    Parameters:
-    - product_info: Dictionary with product details
-    
-    Returns:
-    - Dictionary with image recommendations
-    """
-    try:
-        # Create the prompt for the AI
-        system_prompt = "You are an expert Amazon listing optimization specialist for medical devices with expertise in product photography and image optimization."
-        user_prompt = f"""Create detailed image recommendations for this Amazon medical device listing:
-        
-        Product: {product_info.get('name', 'Unknown')}
-        Category: {product_info.get('category', 'Medical Device')}
-        Description: {product_info.get('description', '')}
-        
-        Provide the following:
-        1. Specific types of images needed for this product (7-9 total images)
-        2. Key features that should be highlighted in close-ups
-        3. How to show the product in use (lifestyle images)
-        4. Size reference recommendations
-        5. Any infographics that would help explain benefits
-        6. How to visually address common customer questions/concerns
-        
-        Be specific to this type of medical device and focus on images that would increase conversion rate.
-        """
-        
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ]
-        
-        # Call the OpenAI API
-        image_recommendations = call_openai_api(messages, max_tokens=800, temperature=0.2)
-        
-        if not image_recommendations:
-            return {"success": False, "error": "Failed to get API response"}
-        
-        # Extract sections
-        image_types = extract_theme_from_analysis(image_recommendations, "Specific types of images needed")
-        feature_highlights = extract_theme_from_analysis(image_recommendations, "Key features that should be highlighted")
-        lifestyle_images = extract_theme_from_analysis(image_recommendations, "How to show the product in use")
-        size_reference = extract_theme_from_analysis(image_recommendations, "Size reference recommendations")
-        infographics = extract_theme_from_analysis(image_recommendations, "Any infographics")
-        address_concerns = extract_theme_from_analysis(image_recommendations, "How to visually address common customer questions")
-        
-        return {
-            "success": True,
-            "full_recommendations": image_recommendations,
-            "sections": {
-                "image_types": image_types,
-                "feature_highlights": feature_highlights,
-                "lifestyle_images": lifestyle_images,
-                "size_reference": size_reference,
-                "infographics": infographics,
-                "address_concerns": address_concerns
-            }
-        }
-    except Exception as e:
-        logger.error(f"Error generating image recommendations: {str(e)}")
-        return {"success": False, "error": str(e)}
-
-def generate_return_reduction_plan(product_info, return_analysis):
-    """
-    Generate a plan to reduce return rates
-    
-    Parameters:
-    - product_info: Dictionary with product details
-    - return_analysis: Analysis of return reasons
-    
-    Returns:
-    - Dictionary with return reduction plan
-    """
-    try:
-        # Format return categories if available
-        return_categories = ""
-        if isinstance(return_analysis, dict) and 'categories' in return_analysis:
-            for category, content in return_analysis['categories'].items():
-                if content:
-                    return_categories += f"{category}: {content}\n\n"
-        
-        # Create the prompt for the AI
-        system_prompt = "You are an expert Amazon listing optimization specialist with deep expertise in reducing return rates for medical devices."
-        user_prompt = f"""Create an actionable return reduction plan for this Amazon medical device:
-        
-        Product: {product_info.get('name', 'Unknown')} (ASIN: {product_info.get('asin', 'Unknown')})
-        Category: {product_info.get('category', 'Medical Device')}
-        Current Return Rate: {product_info.get('return_rate_30d', 0):.2f}%
-        
-        Return Analysis:
-        {return_categories if return_categories else "Not available"}
-        
-        Please provide:
-        1. Immediate listing changes to reduce returns (top 3 priorities)
-        2. Product improvement recommendations
-        3. Packaging/instructions improvements
-        4. Customer expectation management strategies
-        5. Expected impact on return rate for each recommendation
-        
-        The plan should be specific, actionable, and prioritized by impact.
-        """
-        
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ]
-        
-        # Call the OpenAI API
-        return_plan = call_openai_api(messages, max_tokens=1000, temperature=0.2)
-        
-        if not return_plan:
-            return {"success": False, "error": "Failed to get API response"}
-        
-        # Extract sections
-        listing_changes = extract_theme_from_analysis(return_plan, "Immediate listing changes")
-        product_improvements = extract_theme_from_analysis(return_plan, "Product improvement recommendations")
-        packaging_improvements = extract_theme_from_analysis(return_plan, "Packaging/instructions improvements")
-        expectation_management = extract_theme_from_analysis(return_plan, "Customer expectation management strategies")
-        impact_assessment = extract_theme_from_analysis(return_plan, "Expected impact")
-        
-        return {
-            "success": True,
-            "full_plan": return_plan,
-            "sections": {
-                "listing_changes": listing_changes,
-                "product_improvements": product_improvements,
-                "packaging_improvements": packaging_improvements,
-                "expectation_management": expectation_management,
-                "impact_assessment": impact_assessment
-            }
-        }
-    except Exception as e:
-        logger.error(f"Error generating return reduction plan: {str(e)}")
-        return {"success": False, "error": str(e)}
-
-# Non-AI backup functions for when API calls fail
-def keyword_based_review_analysis(reviews):
-    """
-    Perform basic keyword-based analysis of reviews when AI is not available
-    
-    Parameters:
-    - reviews: List of review dictionaries
-    
-    Returns:
-    - Dictionary with analysis results
-    """
-    results = {
-        'total_reviews': len(reviews),
-        'average_rating': 0,
-        'keyword_analysis': {}
-    }
-    
-    # Calculate average rating
-    total_rating = 0
-    rated_reviews = 0
-    
-    for review in reviews:
-        if 'rating' in review and review['rating']:
-            try:
-                rating = float(review['rating'])
-                total_rating += rating
-                rated_reviews += 1
-            except (ValueError, TypeError):
-                pass
-    
-    if rated_reviews > 0:
-        results['average_rating'] = total_rating / rated_reviews
-    
-    # Perform keyword analysis for both medical and Amazon keywords
-    for category, keywords in {**MEDICAL_KEYWORDS, **AMAZON_KEYWORDS}.items():
-        category_count = 0
-        for review in reviews:
-            review_text = review.get('review_text', '').lower()
-            if any(keyword.lower() in review_text for keyword in keywords):
-                category_count += 1
-        
-        results['keyword_analysis'][category] = {
-            'count': category_count,
-            'percentage': (category_count / len(reviews) * 100) if len(reviews) > 0 else 0
-        }
-    
-    return results
-
-def basic_return_analysis(return_reasons):
-    """
-    Perform basic analysis of return reasons when AI is not available
-    
-    Parameters:
-    - return_reasons: List of return reason dictionaries
-    
-    Returns:
-    - Dictionary with analysis results
-    """
-    results = {
-        'total_returns': len(return_reasons),
-        'common_reasons': {},
-        'keyword_analysis': {}
-    }
-    
-    # Count common reasons
-    reason_counts = {}
-    
-    for item in return_reasons:
-        reason = item.get('return_reason', '').strip()
-        if reason:
-            if reason in reason_counts:
-                reason_counts[reason] += 1
-            else:
-                reason_counts[reason] = 1
-    
-    # Sort by frequency
-    sorted_reasons = sorted(reason_counts.items(), key=lambda x: x[1], reverse=True)
-    results['common_reasons'] = dict(sorted_reasons[:10])  # Top 10 reasons
-    
-    # Perform keyword analysis for both medical and Amazon keywords
-    for category, keywords in {**MEDICAL_KEYWORDS, **AMAZON_KEYWORDS}.items():
-        category_count = 0
-        for item in return_reasons:
-            reason_text = item.get('return_reason', '').lower()
-            if any(keyword.lower() in reason_text for keyword in keywords):
-                category_count += 1
-        
-        results['keyword_analysis'][category] = {
-            'count': category_count,
-            'percentage': (category_count / len(return_reasons) * 100) if len(return_reasons) > 0 else 0
-        }
-    
-    return results
-
-def generate_basic_recommendations(product_info, review_analysis, return_analysis):
-    """
-    Generate basic recommendations when AI is not available
-    
-    Parameters:
-    - product_info: Dictionary with product details
-    - review_analysis: Results from review analysis
-    - return_analysis: Results from return analysis
-    
-    Returns:
-    - List of recommendation dictionaries
-    """
-    recommendations = []
-    
-    # Check return rate
-    return_rate = product_info.get('return_rate_30d', 0)
-    if return_rate > 8:
-        recommendations.append({
-            "issue": "High return rate",
-            "recommendation": "Investigate the top return reasons and address product quality issues",
-            "priority": "High"
-        })
-    
-    # Check rating
-    avg_rating = product_info.get('star_rating', 0)
-    if avg_rating and avg_rating < 4.0:
-        recommendations.append({
-            "issue": "Low star rating",
-            "recommendation": "Address common complaints in negative reviews",
-            "priority": "High"
-        })
-    
-    # Check keyword analysis from reviews
-    if isinstance(review_analysis, dict) and 'keyword_analysis' in review_analysis:
-        for category, data in review_analysis['keyword_analysis'].items():
-            if data['percentage'] > 20:  # If more than 20% of reviews mention this category
-                recommendations.append({
-                    "issue": f"High frequency of {category} concerns",
-                    "recommendation": f"Review and address {category} issues mentioned in customer feedback",
-                    "priority": "Medium"
-                })
-    
-    # Check common return reasons
-    if isinstance(return_analysis, dict) and 'common_reasons' in return_analysis and return_analysis['common_reasons']:
-        top_reason = list(return_analysis['common_reasons'].keys())[0]
-        recommendations.append({
-            "issue": f"Most common return reason: {top_reason}",
-            "recommendation": "Address this specific issue in the product description and images",
-            "priority": "High"
-        })
-    
-    # Amazon listing optimization recommendations
-    recommendations.append({
-        "issue": "Title optimization",
-        "recommendation": "Include primary keywords, features and benefits in product title",
-        "priority": "Medium"
-    })
-    
-    recommendations.append({
-        "issue": "Bullet point improvement",
-        "recommendation": "Focus on benefits rather than features in bullet points",
-        "priority": "Medium"
-    })
-    
-    recommendations.append({
-        "issue": "Image optimization",
-        "recommendation": "Include lifestyle images, size references, and feature close-ups",
-        "priority": "High"
-    })
-    
-    recommendations.append({
-        "issue": "Documentation and instructions",
-        "recommendation": "Ensure clear usage instructions are visible in images and description",
-        "priority": "Medium"
-    })
-    
-    return recommendations
+# Export main classes
+__all__ = [
+    'EnhancedAIAnalyzer', 
+    'AnalysisResult', 
+    'RecommendationItem',
+    'APIClient',
+    'ProductSpecificAnalyzer'
+]
