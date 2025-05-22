@@ -16,6 +16,7 @@ import io
 from datetime import datetime, timedelta, date
 from typing import Dict, List, Any, Optional
 import re
+from collections import defaultdict
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -835,11 +836,14 @@ def analyze_for_listing_optimization(product_info, reviews, data_context="all"):
                 'success': True,
                 'ai_analysis': comprehensive_result,
                 'review_categories': categorization_result['categories'],
+                'analytics': categorization_result.get('analytics', {}),
                 'reviews_analyzed': len(reviews),
                 'timestamp': datetime.now().isoformat(),
                 'has_listing_context': bool(listing_context),
                 'data_context': data_context,
-                'date_filter': st.session_state.selected_date_range if data_context == "filtered" else None
+                'date_filter': st.session_state.selected_date_range if data_context == "filtered" else None,
+                'categorized_count': categorization_result.get('categorized_count', 0),
+                'total_reviews': categorization_result.get('total_reviews', len(reviews))
             }
         else:
             return {
@@ -855,57 +859,132 @@ def analyze_for_listing_optimization(product_info, reviews, data_context="all"):
         }
 
 def categorize_all_reviews(all_reviews, product_info, listing_context=""):
-    """Categorize ALL reviews into specific complaint/praise categories"""
+    """Advanced categorization with metrics, sentiment, and actionable insights"""
     try:
-        # Create batches for large review sets to avoid token limits
-        batch_size = 50  # Reduce batch size for better AI processing
+        # Create batches for large review sets
+        batch_size = 40  # Smaller batches for more detailed analysis
         all_categories = {}
         
-        for i in range(0, len(all_reviews), batch_size):
+        # Calculate total reviews for percentage calculations
+        total_reviews = len(all_reviews)
+        
+        for i in range(0, total_reviews, batch_size):
             batch = all_reviews[i:i + batch_size]
             
-            # Prepare batch for analysis - simplified format
+            # Prepare batch with detailed information
             batch_reviews = []
             for review in batch:
-                review_text = f"Review {review['id']}: [{review['rating']}/5] {review['title']} - {review['body'][:200]}..."
+                review_text = f"Review {review['id']}: [{review['rating']}/5 stars] "
+                review_text += f"'{review['title']}' - {review['body'][:300]}"
+                if review.get('verified'):
+                    review_text += " [VERIFIED]"
                 batch_reviews.append(review_text)
             
-            # Simplified categorization prompt for better parsing
+            # Advanced categorization prompt
             categorization_prompt = f"""
-            Categorize these Amazon reviews into common issue categories. Return ONLY valid JSON.
+            Analyze these Amazon reviews and categorize them with detailed metrics. Return ONLY valid JSON.
             
             Product: {product_info.get('asin', 'Unknown')}
-            Reviews {i+1} to {min(i+batch_size, len(all_reviews))}:
+            Batch {i//batch_size + 1}: Reviews {i+1} to {min(i+batch_size, total_reviews)}
             
             {chr(10).join(batch_reviews)}
             
-            Return JSON in this exact format (no extra text):
+            For EACH category found, calculate:
+            - Exact count of matching reviews
+            - Average rating of those reviews
+            - Sentiment score (-1 to +1, where -1=very negative, 0=neutral, +1=very positive)
+            - Specific actionable suggestion for listing optimization
+            - Priority level (H/M/L based on impact: High=affects >20% or <3.0 rating, Medium=10-20% or 3.0-3.5, Low=<10% or >3.5)
+            
+            Return JSON in this EXACT format:
             {{
-                "size_issues": {{"count": 0, "trend": "size complaint summary", "examples": ["quote1"]}},
-                "quality_issues": {{"count": 0, "trend": "quality complaint summary", "examples": ["quote1"]}},
-                "noise_issues": {{"count": 0, "trend": "noise complaint summary", "examples": ["quote1"]}},
-                "fit_issues": {{"count": 0, "trend": "fit complaint summary", "examples": ["quote1"]}},
-                "durability_issues": {{"count": 0, "trend": "durability complaint summary", "examples": ["quote1"]}},
-                "ease_of_use": {{"count": 0, "trend": "usability feedback", "examples": ["quote1"]}},
-                "value_issues": {{"count": 0, "trend": "price/value concerns", "examples": ["quote1"]}},
-                "positive_highlights": {{"count": 0, "trend": "most praised features", "examples": ["quote1"]}}
+                "size_too_small": {{
+                    "count": 0,
+                    "avg_rating": 0.0,
+                    "sentiment_score": 0.0,
+                    "suggested_action": "specific action for this issue",
+                    "priority": "H/M/L",
+                    "example_quotes": ["actual quote 1", "actual quote 2"]
+                }},
+                "size_too_large": {{
+                    "count": 0,
+                    "avg_rating": 0.0,
+                    "sentiment_score": 0.0,
+                    "suggested_action": "specific action",
+                    "priority": "H/M/L",
+                    "example_quotes": ["quote 1", "quote 2"]
+                }},
+                "quality_issues": {{
+                    "count": 0,
+                    "avg_rating": 0.0,
+                    "sentiment_score": 0.0,
+                    "suggested_action": "specific action",
+                    "priority": "H/M/L",
+                    "example_quotes": ["quote 1", "quote 2"]
+                }},
+                "durability_problems": {{
+                    "count": 0,
+                    "avg_rating": 0.0,
+                    "sentiment_score": 0.0,
+                    "suggested_action": "specific action",
+                    "priority": "H/M/L",
+                    "example_quotes": ["quote 1", "quote 2"]
+                }},
+                "defective_item": {{
+                    "count": 0,
+                    "avg_rating": 0.0,
+                    "sentiment_score": 0.0,
+                    "suggested_action": "specific action",
+                    "priority": "H/M/L",
+                    "example_quotes": ["quote 1", "quote 2"]
+                }},
+                "inaccurate_description": {{
+                    "count": 0,
+                    "avg_rating": 0.0,
+                    "sentiment_score": 0.0,
+                    "suggested_action": "specific action",
+                    "priority": "H/M/L",
+                    "example_quotes": ["quote 1", "quote 2"]
+                }},
+                "shipping_packaging": {{
+                    "count": 0,
+                    "avg_rating": 0.0,
+                    "sentiment_score": 0.0,
+                    "suggested_action": "specific action",
+                    "priority": "H/M/L",
+                    "example_quotes": ["quote 1", "quote 2"]
+                }},
+                "value_concerns": {{
+                    "count": 0,
+                    "avg_rating": 0.0,
+                    "sentiment_score": 0.0,
+                    "suggested_action": "specific action",
+                    "priority": "H/M/L",
+                    "example_quotes": ["quote 1", "quote 2"]
+                }},
+                "positive_highlights": {{
+                    "count": 0,
+                    "avg_rating": 0.0,
+                    "sentiment_score": 0.0,
+                    "suggested_action": "leverage this strength",
+                    "priority": "H/M/L",
+                    "example_quotes": ["quote 1", "quote 2"]
+                }}
             }}
             
-            Only include categories with count > 0. Set count to actual number of matching reviews.
+            Only include categories with count > 0. Be precise with metrics.
             """
             
             # Call AI for this batch
             batch_result = st.session_state.ai_analyzer.api_client.call_api([
-                {"role": "system", "content": "You are a review categorization expert. Return only valid JSON with no additional text or explanations."},
+                {"role": "system", "content": "You are an expert Amazon listing optimization analyst. Provide precise metrics and actionable recommendations. Return only valid JSON."},
                 {"role": "user", "content": categorization_prompt}
-            ], max_tokens=800)
+            ], max_tokens=1200)
             
             if batch_result['success']:
                 try:
-                    # Clean the response to ensure it's valid JSON
+                    # Clean and parse JSON response
                     response_text = batch_result['result'].strip()
-                    
-                    # Remove any text before the first { or after the last }
                     start_idx = response_text.find('{')
                     end_idx = response_text.rfind('}')
                     
@@ -913,49 +992,278 @@ def categorize_all_reviews(all_reviews, product_info, listing_context=""):
                         json_text = response_text[start_idx:end_idx + 1]
                         batch_categories = json.loads(json_text)
                         
-                        # Merge batch results with overall results
+                        # Merge and accumulate results
                         for category, data in batch_categories.items():
-                            if category not in all_categories:
-                                all_categories[category] = {
-                                    'count': 0,
-                                    'reviews': [],
-                                    'trend': ''
-                                }
-                            
-                            all_categories[category]['count'] += data.get('count', 0)
-                            all_categories[category]['reviews'].extend(data.get('examples', []))
-                            if data.get('trend') and data['count'] > 0:
-                                all_categories[category]['trend'] = data['trend']
-                    else:
-                        st.warning(f"Invalid JSON structure in batch {i//batch_size + 1}")
-                        continue
+                            if data.get('count', 0) > 0:
+                                if category not in all_categories:
+                                    all_categories[category] = {
+                                        'count': 0,
+                                        'total_rating': 0,
+                                        'total_sentiment': 0,
+                                        'example_quotes': [],
+                                        'suggested_action': data.get('suggested_action', ''),
+                                        'priority': data.get('priority', 'M')
+                                    }
+                                
+                                all_categories[category]['count'] += data['count']
+                                all_categories[category]['total_rating'] += data['avg_rating'] * data['count']
+                                all_categories[category]['total_sentiment'] += data['sentiment_score'] * data['count']
+                                all_categories[category]['example_quotes'].extend(data.get('example_quotes', []))
+                                
+                                # Update priority if this batch has higher priority
+                                if data.get('priority') == 'H':
+                                    all_categories[category]['priority'] = 'H'
+                                elif data.get('priority') == 'M' and all_categories[category]['priority'] == 'L':
+                                    all_categories[category]['priority'] = 'M'
                 
                 except json.JSONDecodeError as e:
-                    st.warning(f"Could not parse categorization for batch {i//batch_size + 1}: {str(e)}")
+                    st.warning(f"JSON parsing failed for batch {i//batch_size + 1}: {str(e)}")
                     continue
             else:
-                st.warning(f"AI call failed for batch {i//batch_size + 1}")
+                st.warning(f"AI analysis failed for batch {i//batch_size + 1}")
             
-            # Update progress
-            progress = min(i + batch_size, len(all_reviews))
-            st.info(f"📊 Processed {progress}/{len(all_reviews)} reviews...")
+            # Progress update
+            progress = min(i + batch_size, total_reviews)
+            st.info(f"📊 Advanced analysis: {progress}/{total_reviews} reviews processed...")
         
-        # Filter out empty categories
-        filtered_categories = {k: v for k, v in all_categories.items() if v['count'] > 0}
+        # Calculate final metrics for each category
+        final_categories = {}
+        for category, data in all_categories.items():
+            if data['count'] > 0:
+                final_categories[category] = {
+                    'count': data['count'],
+                    'percentage': round((data['count'] / total_reviews) * 100, 1),
+                    'avg_rating': round(data['total_rating'] / data['count'], 1),
+                    'avg_sentiment': round(data['total_sentiment'] / data['count'], 2),
+                    'suggested_action': data['suggested_action'],
+                    'priority': data['priority'],
+                    'example_quotes': data['example_quotes'][:3]  # Keep top 3 examples
+                }
+        
+        # Calculate additional analytics
+        analytics = calculate_advanced_analytics(all_reviews, final_categories)
         
         return {
             'success': True,
-            'categories': filtered_categories,
-            'total_categorized': sum(cat['count'] for cat in filtered_categories.values())
+            'categories': final_categories,
+            'analytics': analytics,
+            'total_reviews': total_reviews,
+            'categorized_count': sum(cat['count'] for cat in final_categories.values())
         }
         
     except Exception as e:
-        logger.error(f"Categorization error: {str(e)}")
+        logger.error(f"Advanced categorization error: {str(e)}")
         return {
             'success': False,
             'error': str(e),
             'categories': {}
         }
+
+def calculate_advanced_analytics(all_reviews, categories):
+    """Calculate correlation matrix and time series data"""
+    try:
+        analytics = {}
+        
+        # Extract review data for correlation analysis
+        review_data = []
+        for review in all_reviews:
+            if review.get('rating') and review.get('body'):
+                review_data.append({
+                    'rating': review['rating'],
+                    'review_length': len(review['body']),
+                    'sentiment_proxy': 1 if review['rating'] >= 4 else -1 if review['rating'] <= 2 else 0,
+                    'date': review.get('parsed_date')
+                })
+        
+        if len(review_data) > 10:  # Need sufficient data
+            # Simple correlation calculations
+            ratings = [r['rating'] for r in review_data]
+            lengths = [r['review_length'] for r in review_data]
+            sentiments = [r['sentiment_proxy'] for r in review_data]
+            
+            # Calculate basic correlations
+            rating_length_corr = np.corrcoef(ratings, lengths)[0, 1] if len(set(lengths)) > 1 else 0
+            rating_sentiment_corr = np.corrcoef(ratings, sentiments)[0, 1] if len(set(sentiments)) > 1 else 0
+            
+            analytics['correlations'] = {
+                'rating_vs_length': round(rating_length_corr, 3),
+                'rating_vs_sentiment': round(rating_sentiment_corr, 3),
+                'insights': []
+            }
+            
+            # Generate insights
+            if abs(rating_length_corr) > 0.3:
+                direction = "longer" if rating_length_corr > 0 else "shorter"
+                analytics['correlations']['insights'].append(
+                    f"Strong correlation: {direction} reviews tend to have {'higher' if rating_length_corr > 0 else 'lower'} ratings"
+                )
+        
+        # Time series analysis (simplified)
+        if any(r.get('date') for r in review_data):
+            # Group by week/month for trend analysis
+            time_trends = defaultdict(list)
+            for review in review_data:
+                if review.get('date'):
+                    # Group by month for simplicity
+                    month_key = review['date'].strftime('%Y-%m')
+                    time_trends[month_key].append(review['rating'])
+            
+            # Calculate monthly averages
+            monthly_trends = {}
+            for month, ratings in time_trends.items():
+                monthly_trends[month] = {
+                    'avg_rating': round(sum(ratings) / len(ratings), 2),
+                    'review_count': len(ratings)
+                }
+            
+            analytics['time_trends'] = monthly_trends
+        
+        return analytics
+        
+    except Exception as e:
+        logger.warning(f"Analytics calculation failed: {str(e)}")
+        return {'correlations': {}, 'time_trends': {}}
+
+def display_advanced_summary_table(categories, analytics, total_reviews):
+    """Display the sophisticated summary table like the user's example"""
+    
+    st.markdown("""
+    <div style="background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); 
+                padding: 1.5rem; border-radius: 10px; color: white; margin: 2rem 0;">
+        <h2>📊 Advanced Review Analysis Summary</h2>
+        <p>Comprehensive categorization with actionable metrics and insights</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    if not categories:
+        st.warning("No categories found in analysis")
+        return
+    
+    # Sort categories by priority then by count
+    priority_order = {'H': 3, 'M': 2, 'L': 1}
+    sorted_categories = sorted(
+        categories.items(), 
+        key=lambda x: (priority_order.get(x[1]['priority'], 0), x[1]['count']), 
+        reverse=True
+    )
+    
+    # Create the advanced summary table
+    table_data = []
+    for category_key, data in sorted_categories:
+        # Format category name
+        category_name = category_key.replace('_', ' ').title()
+        if 'size' in category_key.lower():
+            category_name = category_key.replace('size_', '').replace('_', ' ').title()
+        elif 'quality' in category_key.lower():
+            category_name = "Product Quality Issue"
+        elif 'defective' in category_key.lower():
+            category_name = "Defective Item"
+        elif 'inaccurate' in category_key.lower():
+            category_name = "Inaccurate Description"
+        elif 'shipping' in category_key.lower():
+            category_name = "Shipping/Packaging"
+        elif 'value' in category_key.lower():
+            category_name = "Value Concerns"
+        elif 'positive' in category_key.lower():
+            category_name = "Positive Highlights"
+        
+        table_data.append({
+            'Category': category_name,
+            'Count': data['count'],
+            '% of Reviews': f"{data['percentage']}%",
+            'Avg Rating': data['avg_rating'],
+            'Avg Sentiment (-1→+1)': data['avg_sentiment'],
+            'Suggested Action': data['suggested_action'][:60] + "..." if len(data['suggested_action']) > 60 else data['suggested_action'],
+            'Priority (H/M/L)': data['priority']
+        })
+    
+    # Display as styled dataframe
+    if table_data:
+        df = pd.DataFrame(table_data)
+        
+        # Style the dataframe
+        def style_dataframe(df):
+            def highlight_priority(val):
+                if val == 'H':
+                    return 'background-color: #ffebee; color: #c62828; font-weight: bold'
+                elif val == 'M':
+                    return 'background-color: #fff3e0; color: #ef6c00; font-weight: bold'
+                else:
+                    return 'background-color: #f1f8e9; color: #558b2f; font-weight: bold'
+            
+            def highlight_rating(val):
+                if val < 3.0:
+                    return 'background-color: #ffebee; color: #c62828'
+                elif val < 3.5:
+                    return 'background-color: #fff3e0; color: #ef6c00'
+                else:
+                    return 'background-color: #f1f8e9; color: #558b2f'
+            
+            def highlight_sentiment(val):
+                if val < -0.3:
+                    return 'background-color: #ffebee; color: #c62828'
+                elif val < 0.1:
+                    return 'background-color: #fff3e0; color: #ef6c00'
+                else:
+                    return 'background-color: #f1f8e9; color: #558b2f'
+            
+            styled = df.style.applymap(highlight_priority, subset=['Priority (H/M/L)'])
+            styled = styled.applymap(highlight_rating, subset=['Avg Rating'])
+            styled = styled.applymap(highlight_sentiment, subset=['Avg Sentiment (-1→+1)'])
+            
+            return styled
+        
+        # Display the styled table
+        st.dataframe(style_dataframe(df), use_container_width=True, hide_index=True)
+        
+        # Key insights below the table
+        st.markdown("### 🎯 Key Insights")
+        
+        high_priority = [item for item in table_data if item['Priority (H/M/L)'] == 'H']
+        if high_priority:
+            st.error(f"🔥 **{len(high_priority)} Critical Issues** requiring immediate attention")
+            for item in high_priority[:3]:  # Show top 3
+                st.markdown(f"• **{item['Category']}**: {item['Count']} reviews ({item['% of Reviews']}) - {item['Suggested Action']}")
+        
+        # Show correlations if available
+        if analytics.get('correlations'):
+            corr = analytics['correlations']
+            st.markdown("### 📈 Correlation Analysis")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Rating vs Review Length", f"{corr.get('rating_vs_length', 0):.3f}")
+            with col2:
+                st.metric("Rating vs Sentiment", f"{corr.get('rating_vs_sentiment', 0):.3f}")
+            
+            for insight in corr.get('insights', []):
+                st.info(f"💡 {insight}")
+        
+        # Time trends if available
+        if analytics.get('time_trends'):
+            st.markdown("### 📅 Time Series Trends")
+            trends = analytics['time_trends']
+            
+            # Show recent months
+            recent_months = sorted(trends.keys())[-6:]  # Last 6 months
+            if len(recent_months) > 1:
+                trend_data = []
+                for month in recent_months:
+                    trend_data.append({
+                        'Month': month,
+                        'Avg Rating': trends[month]['avg_rating'],
+                        'Review Count': trends[month]['review_count']
+                    })
+                
+                trend_df = pd.DataFrame(trend_data)
+                st.dataframe(trend_df, use_container_width=True, hide_index=True)
+                
+                # Calculate trend
+                first_rating = trend_df.iloc[0]['Avg Rating']
+                last_rating = trend_df.iloc[-1]['Avg Rating']
+                trend_direction = "📈" if last_rating > first_rating else "📉" if last_rating < first_rating else "➡️"
+                
+                st.info(f"{trend_direction} **Rating Trend**: {first_rating} → {last_rating} over {len(recent_months)} months")
 
 def run_basic_analysis():
     """Fallback basic analysis when AI is unavailable"""
@@ -1017,7 +1325,7 @@ def display_analysis_results():
         display_basic_results(results)
 
 def display_comprehensive_ai_results(results):
-    """Display comprehensive AI analysis results with better formatting"""
+    """Display comprehensive AI analysis results with advanced summary table"""
     ai_analysis = results['ai_analysis']
     
     # Summary metrics at top
@@ -1046,13 +1354,21 @@ def display_comprehensive_ai_results(results):
         date_filter = results['date_filter']
         st.info(f"📅 **Date Filter Applied**: Analyzing reviews from {date_filter['start']} to {date_filter['end']}")
     
-    # Review Categories Section - NEW!
+    # Advanced Summary Table - NEW!
     if results.get('review_categories'):
-        display_review_categories(results['review_categories'])
+        display_advanced_summary_table(
+            results['review_categories'], 
+            results.get('analytics', {}), 
+            results.get('reviews_analyzed', 0)
+        )
+    
+    # Enhanced Category Deep Dive
+    if results.get('review_categories'):
+        display_enhanced_category_details(results['review_categories'])
     
     # Main analysis sections
     if ai_analysis.get('listing_improvements'):
-        st.markdown("### 🎯 Listing Optimization Recommendations")
+        st.markdown("### 🎯 AI Listing Optimization Recommendations")
         st.info(ai_analysis['listing_improvements'])
     
     if ai_analysis.get('safety_concerns'):
@@ -1080,6 +1396,108 @@ def display_comprehensive_ai_results(results):
             st.text(ai_analysis['raw_response'])
         else:
             st.json(ai_analysis)
+
+def display_enhanced_category_details(categories):
+    """Display detailed category analysis with examples and word clouds"""
+    
+    st.markdown("### 🔍 Category Deep Dive")
+    
+    # Sort categories by priority and count
+    priority_order = {'H': 3, 'M': 2, 'L': 1}
+    sorted_categories = sorted(
+        categories.items(), 
+        key=lambda x: (priority_order.get(x[1]['priority'], 0), x[1]['count']), 
+        reverse=True
+    )
+    
+    # Create tabs for high-priority issues
+    high_priority_cats = [(k, v) for k, v in sorted_categories if v.get('priority') == 'H']
+    medium_priority_cats = [(k, v) for k, v in sorted_categories if v.get('priority') == 'M']
+    
+    if high_priority_cats:
+        tab1, tab2 = st.tabs(["🔥 Critical Issues", "⚠️ Medium Priority"])
+        
+        with tab1:
+            for category_key, category_data in high_priority_cats:
+                display_category_detail_card(category_key, category_data, "#F44336")
+        
+        with tab2:
+            for category_key, category_data in medium_priority_cats:
+                display_category_detail_card(category_key, category_data, "#FF9800")
+    else:
+        # Single tab if no high priority issues
+        for category_key, category_data in sorted_categories[:5]:  # Show top 5
+            display_category_detail_card(category_key, category_data, "#2196F3")
+
+def display_category_detail_card(category_key, category_data, border_color):
+    """Display individual category detail card"""
+    
+    category_name = category_key.replace('_', ' ').title()
+    if 'size' in category_key.lower():
+        category_name = category_key.replace('size_', '').replace('_', ' ').title()
+    elif 'quality' in category_key.lower():
+        category_name = "Product Quality Issue"
+    elif 'positive' in category_key.lower():
+        category_name = "✨ Customer Highlights"
+        border_color = "#4CAF50"
+    
+    with st.expander(f"{category_name} - {category_data['count']} reviews ({category_data.get('percentage', 0)}%)", expanded=category_data['count'] > 20):
+        
+        # Metrics row
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Count", category_data['count'])
+        
+        with col2:
+            rating_color = "#4CAF50" if category_data.get('avg_rating', 0) >= 4 else "#F44336" if category_data.get('avg_rating', 0) < 3 else "#FF9800"
+            st.markdown(f"<div style='text-align: center;'><h3 style='color: {rating_color};'>{category_data.get('avg_rating', 0):.1f}/5</h3><p>Avg Rating</p></div>", unsafe_allow_html=True)
+        
+        with col3:
+            sentiment = category_data.get('avg_sentiment', 0)
+            sentiment_color = "#4CAF50" if sentiment > 0.1 else "#F44336" if sentiment < -0.1 else "#FF9800"
+            st.markdown(f"<div style='text-align: center;'><h3 style='color: {sentiment_color};'>{sentiment:.2f}</h3><p>Sentiment</p></div>", unsafe_allow_html=True)
+        
+        with col4:
+            priority = category_data.get('priority', 'M')
+            priority_colors = {'H': '#F44336', 'M': '#FF9800', 'L': '#4CAF50'}
+            st.markdown(f"<div style='text-align: center;'><h3 style='color: {priority_colors[priority]};'>{priority}</h3><p>Priority</p></div>", unsafe_allow_html=True)
+        
+        # Suggested action
+        st.markdown(f"""
+        <div style="background: {border_color}20; padding: 1rem; border-radius: 8px; border-left: 4px solid {border_color}; margin: 1rem 0;">
+            <h4>🎯 Recommended Action</h4>
+            <p><strong>{category_data.get('suggested_action', 'No specific action provided')}</strong></p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Customer quotes
+        quotes = category_data.get('example_quotes', [])
+        if quotes:
+            st.markdown("**💬 Customer Voice:**")
+            for i, quote in enumerate(quotes[:3], 1):
+                st.markdown(f"""
+                <div style="background: #f8f9fa; padding: 0.8rem; border-radius: 6px; margin: 0.5rem 0; 
+                           border-left: 3px solid {border_color};">
+                    <em>"{quote}"</em>
+                </div>
+                """, unsafe_allow_html=True)
+        
+        # Word frequency analysis (simple)
+        if quotes:
+            all_text = ' '.join(quotes).lower()
+            # Simple word frequency for key terms
+            key_words = ['small', 'large', 'big', 'quality', 'cheap', 'broken', 'defective', 'wrong', 'perfect', 'great', 'excellent']
+            word_freq = {}
+            for word in key_words:
+                count = all_text.count(word)
+                if count > 0:
+                    word_freq[word] = count
+            
+            if word_freq:
+                st.markdown("**🔤 Key Terms:**")
+                for word, freq in sorted(word_freq.items(), key=lambda x: x[1], reverse=True)[:5]:
+                    st.markdown(f"• **{word.title()}**: mentioned {freq} times")
 
 def display_modern_date_filtering(data):
     """Modern date filtering interface"""
@@ -1190,124 +1608,7 @@ def display_modern_rating_distribution(reviews, data_label):
             
             st.dataframe(rating_df, use_container_width=True, hide_index=True)
 
-def display_review_categories(categories):
-    """Enhanced modern review categories display"""
-    st.markdown("""
-    <div style="background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); 
-                padding: 1.5rem; border-radius: 10px; color: white; margin: 2rem 0;">
-        <h3>📊 AI Review Categorization</h3>
-        <p>Customer feedback organized by themes and actionable insights</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Create modern tabs
-    tab1, tab2 = st.tabs(["🔴 Issues & Opportunities", "🟢 Strengths & Positives"])
-    
-    with tab1:
-        # Issue categories with modern styling
-        issue_categories = [
-            'size_issues', 'quality_issues', 'noise_issues', 'fit_issues', 
-            'durability_issues', 'value_issues'
-        ]
-        
-        issues_found = []
-        for category_key in issue_categories:
-            if category_key in categories and categories[category_key]['count'] > 0:
-                issues_found.append((category_key, categories[category_key]))
-        
-        if issues_found:
-            # Sort by count (most common first)
-            issues_found.sort(key=lambda x: x[1]['count'], reverse=True)
-            
-            for category_key, category_data in issues_found:
-                category_name = category_key.replace('_', ' ').title()
-                urgency_color = "#F44336" if category_data['count'] > 10 else "#FF9800" if category_data['count'] > 5 else "#FFC107"
-                
-                with st.expander(f"🔴 {category_name} ({category_data['count']} reviews)", expanded=category_data['count'] > 10):
-                    st.markdown(f"""
-                    <div style="background: {urgency_color}20; padding: 1rem; border-radius: 8px; border-left: 4px solid {urgency_color};">
-                        <h4>🎯 Most Common Pattern</h4>
-                        <p><strong>{category_data['trend']}</strong></p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    st.markdown("**📝 Example Customer Feedback:**")
-                    for i, example in enumerate(category_data.get('reviews', category_data.get('examples', []))[:3]):
-                        st.markdown(f"""
-                        <div style="background: #f8f9fa; padding: 0.8rem; border-radius: 6px; margin: 0.5rem 0; border-left: 3px solid #dee2e6;">
-                            <em>"{example}"</em>
-                        </div>
-                        """, unsafe_allow_html=True)
-                    
-                    remaining = len(category_data.get('reviews', category_data.get('examples', []))) - 3
-                    if remaining > 0:
-                        st.caption(f"...and {remaining} more similar reviews")
-        else:
-            st.markdown("""
-            <div style="background: #4CAF5020; padding: 2rem; border-radius: 10px; text-align: center; border: 2px solid #4CAF50;">
-                <h3>🎉 Excellent News!</h3>
-                <p>No significant complaint categories identified in your reviews</p>
-            </div>
-            """, unsafe_allow_html=True)
-    
-    with tab2:
-        # Positive categories
-        positive_categories = ['positive_highlights', 'ease_of_use']
-        
-        positives_found = []
-        for category_key in positive_categories:
-            if category_key in categories and categories[category_key]['count'] > 0:
-                positives_found.append((category_key, categories[category_key]))
-        
-        if positives_found:
-            for category_key, category_data in positives_found:
-                category_name = category_key.replace('_', ' ').title()
-                
-                with st.expander(f"🟢 {category_name} ({category_data['count']} reviews)", expanded=True):
-                    st.markdown(f"""
-                    <div style="background: #4CAF5020; padding: 1rem; border-radius: 8px; border-left: 4px solid #4CAF50;">
-                        <h4>⭐ Customer Love</h4>
-                        <p><strong>{category_data['trend']}</strong></p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    st.markdown("**💬 Happy Customer Quotes:**")
-                    for example in category_data.get('reviews', category_data.get('examples', []))[:3]:
-                        st.markdown(f"""
-                        <div style="background: #e8f5e8; padding: 0.8rem; border-radius: 6px; margin: 0.5rem 0; border-left: 3px solid #4CAF50;">
-                            <em>"{example}"</em>
-                        </div>
-                        """, unsafe_allow_html=True)
-        else:
-            st.info("ℹ️ No specific positive highlight categories identified")
-    
-    # Modern summary with actionable insights
-    total_categorized = sum(cat['count'] for cat in categories.values())
-    sorted_categories = sorted(categories.items(), key=lambda x: x[1]['count'], reverse=True)
-    
-    st.markdown("### 🎯 Action Priority Matrix")
-    
-    if len(sorted_categories) >= 3:
-        top_3 = sorted_categories[:3]
-        
-        col1, col2, col3 = st.columns(3)
-        for i, (category_key, category_data) in enumerate(top_3):
-            category_name = category_key.replace('_', ' ').title()
-            priority_colors = ["#F44336", "#FF9800", "#FFC107"]
-            priority_labels = ["🔥 Critical", "⚠️ Important", "📝 Notable"]
-            
-            with [col1, col2, col3][i]:
-                st.markdown(f"""
-                <div style="background: {priority_colors[i]}20; padding: 1rem; border-radius: 8px; 
-                           border: 2px solid {priority_colors[i]}; text-align: center;">
-                    <h4>{priority_labels[i]}</h4>
-                    <h5>{category_name}</h5>
-                    <p><strong>{category_data['count']} reviews</strong></p>
-                    <p><em>{category_data['trend'][:50]}...</em></p>
-                </div>
-                """, unsafe_allow_html=True)
-    
-    st.markdown(f"**📈 Analysis Summary:** {total_categorized} reviews successfully categorized into actionable themes")
+# Remove the old display_review_categories function - replaced with advanced summary table
 
 def display_basic_results(results):
     """Display basic analysis results"""
