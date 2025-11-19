@@ -150,14 +150,15 @@ class IntelligenceEngine:
         except:
             return items
 
-if 'ai' not in st.session_state:
+# --- FIX: Force Re-initialization if Schema Changes ---
+if 'ai' not in st.session_state or not hasattr(st.session_state.ai, 'clients'):
     st.session_state.ai = IntelligenceEngine()
 
 # --- 4. ADVANCED DATA HANDLER (MULTI-FILE & DIRTY HEADER LOGIC) ---
 class DataHandler:
     
     @staticmethod
-    def find_header_row(df, keywords=['sku', 'asin', 'product', 'title', 'date']):
+    def find_header_row(df, keywords=['sku', 'asin', 'product', 'title', 'date', 'order', 'return']):
         """Scans first 20 rows to find the true header row based on keywords."""
         for i in range(min(20, len(df))):
             row_values = df.iloc[i].astype(str).str.lower().tolist()
@@ -175,7 +176,7 @@ class DataHandler:
             raw_df = pd.read_excel(file, header=None)
             
             # Find header row (skipping "Odoo - Inventory Forecast...")
-            header_idx = DataHandler.find_header_row(raw_df, keywords=['product', 'sku', 'forecast', 'quantity'])
+            header_idx = DataHandler.find_header_row(raw_df, keywords=['product', 'sku', 'forecast', 'quantity', 'available'])
             
             # Reload with correct header
             df = pd.read_excel(file, header=header_idx)
@@ -186,17 +187,18 @@ class DataHandler:
             # Handle the Sales Column (often Unnamed: 11 or similar)
             # We look for columns that might be the sales data if they are unnamed
             for col in df.columns:
-                if "Unnamed" in col:
+                if "Unnamed" in str(col):
                     # Heuristic: Check if data in this column is numeric
                     if pd.to_numeric(df[col], errors='coerce').notna().sum() > (len(df) * 0.5):
                         # Rename using the user-selected period
                         df.rename(columns={col: f"Sales_{period_label}"}, inplace=True)
                         break
             
-            df['Source_File'] = "Odoo_Forecast"
+            df['Source_File'] = file.name
+            df['Source_Type'] = "Odoo_Forecast"
             return df
         except Exception as e:
-            st.error(f"Odoo Parse Error: {e}")
+            st.error(f"Odoo Parse Error ({file.name}): {e}")
             return None
 
     @staticmethod
@@ -204,13 +206,14 @@ class DataHandler:
         """Special logic for Pivot Return Reports"""
         try:
             raw_df = pd.read_excel(file, header=None)
-            header_idx = DataHandler.find_header_row(raw_df, keywords=['return', 'reason', 'sku', 'product'])
+            header_idx = DataHandler.find_header_row(raw_df, keywords=['return', 'reason', 'sku', 'product', 'order'])
             
             df = pd.read_excel(file, header=header_idx)
-            df['Source_File'] = "Return_Report"
+            df['Source_File'] = file.name
+            df['Source_Type'] = "Return_Report"
             return df
         except Exception as e:
-            st.error(f"Return Report Parse Error: {e}")
+            st.error(f"Return Report Parse Error ({file.name}): {e}")
             return None
 
     @staticmethod
@@ -224,7 +227,7 @@ class DataHandler:
             if "odoo" in fname or "forecast" in fname:
                 df = DataHandler.process_odoo_file(file, odoo_period)
                 
-            elif "pivot" in fname or "return.report" in fname:
+            elif "pivot" in fname or "return" in fname:
                 df = DataHandler.process_return_report(file)
                 
             else:
@@ -236,10 +239,10 @@ class DataHandler:
                     raw_df = pd.read_excel(file, header=None)
                     h_idx = DataHandler.find_header_row(raw_df)
                     df = pd.read_excel(file, header=h_idx)
+                df['Source_File'] = file.name
+                df['Source_Type'] = "Generic"
             
             if df is not None:
-                # Add a tracking column for origin
-                df['Origin_File'] = file.name
                 combined_df = pd.concat([combined_df, df], ignore_index=True)
                 
         return combined_df
@@ -249,8 +252,8 @@ class DataHandler:
         cols = [str(c).lower() for c in df.columns]
         mapping = {}
         
-        # Smart Detection
-        mapping['text'] = next((c for c in df.columns if any(x in str(c).lower() for x in ['body', 'comment', 'review', 'reason', 'complaint'])), None)
+        # Smart Detection for Text Analysis
+        mapping['text'] = next((c for c in df.columns if any(x in str(c).lower() for x in ['body', 'comment', 'review', 'reason', 'complaint', 'notes'])), None)
         mapping['date'] = next((c for c in df.columns if 'date' in str(c).lower()), None)
         
         return mapping
@@ -397,7 +400,7 @@ def render_categorizer():
                 valid_df = df[df[text_col].notna()].copy()
                 
                 # Limit for demo speed if huge
-                process_limit = 100
+                process_limit = 200
                 if len(valid_df) > process_limit:
                     st.caption(f"Demo mode: Processing first {process_limit} records for speed...")
                     valid_df = valid_df.head(process_limit)
@@ -408,7 +411,7 @@ def render_categorizer():
                 # AI Batch Process
                 results = st.session_state.ai.categorize_batch(items)
                 
-                # Assign back to dataframe (careful with indices if filtered)
+                # Assign back to dataframe
                 valid_df['Category'] = [r.get('category', 'Uncategorized') for r in results]
                 
                 # Update session state
@@ -419,7 +422,7 @@ def render_categorizer():
     if 'analyzed_df' in st.session_state:
         st.markdown("### Classification Results")
         # Show key columns
-        display_cols = [c for c in st.session_state.analyzed_df.columns if c in ['Category', 'Origin_File'] or "Sales" in c]
+        display_cols = [c for c in st.session_state.analyzed_df.columns if c in ['Category', 'Origin_File', 'Source_Type'] or "Sales" in c]
         st.dataframe(st.session_state.analyzed_df, use_container_width=True)
         
         csv = st.session_state.analyzed_df.to_csv(index=False).encode('utf-8')
