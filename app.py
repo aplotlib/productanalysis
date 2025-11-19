@@ -1,400 +1,479 @@
 import streamlit as st
 import pandas as pd
-import logging
+import plotly.express as px
+import plotly.graph_objects as go
+import google.generativeai as genai
+from PIL import Image
+import io
 import time
+import re
 from datetime import datetime
-
-# --- CUSTOM MODULE IMPORTS ---
-# We wrap imports in try/except to handle potential missing file issues gracefully
-try:
-    from enhanced_ai_analysis import EnhancedAIAnalyzer, ProjectPlanGenerator
-    from upload_handler import UploadHandler
-    from dashboard import SimpleDashboard
-    MODULES_LOADED = True
-except ImportError as e:
-    st.error(f"Critical System Error: Missing required modules. {str(e)}")
-    MODULES_LOADED = False
+import collections
 
 # --- CONFIGURATION ---
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
 st.set_page_config(
-    page_title="Vive Health Quality Command Center",
-    page_icon="🏥",
+    page_title="Product Lifecycle Intelligence",
+    page_icon="🧬",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# --- CUSTOM STYLING ---
-def load_css():
-    st.markdown("""
-        <style>
-        /* Global Fonts & Colors */
-        .stApp {
-            background-color: #F8FAFC;
-        }
-        h1, h2, h3 {
-            color: #0F172A;
-            font-family: 'Helvetica Neue', sans-serif;
-        }
-        
-        /* Header Gradient */
-        .header-container {
-            background: linear-gradient(135deg, #1E3A8A 0%, #3B82F6 100%);
-            padding: 2rem;
-            border-radius: 12px;
-            color: white;
-            margin-bottom: 2rem;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-        }
-        .header-container h1 { color: white !important; margin-bottom: 0.5rem; }
-        .header-container p { color: #DBEAFE; font-size: 1.1rem; }
+# --- API SETUP ---
+try:
+    api_key = st.secrets["GEMINI_API_KEY"]
+except Exception:
+    api_key = ""  # Handler for local/missing key
 
-        /* Card Styling */
-        .card {
-            background: white;
-            padding: 1.5rem;
-            border-radius: 10px;
-            border: 1px solid #E2E8F0;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-            margin-bottom: 1rem;
-        }
-        
-        /* Buttons */
-        .stButton button {
-            width: 100%;
-            border-radius: 8px;
-            font-weight: 600;
-            transition: all 0.2s;
-        }
-        .primary-btn button {
-            background-color: #2563EB;
-            color: white;
-        }
-        
-        /* Recommendation Banners */
-        .rec-banner-red {
-            background-color: #FEF2F2;
-            border-left: 5px solid #EF4444;
-            padding: 1rem;
-            border-radius: 0 8px 8px 0;
-        }
-        .rec-banner-green {
-            background-color: #F0FDF4;
-            border-left: 5px solid #22C55E;
-            padding: 1rem;
-            border-radius: 0 8px 8px 0;
-        }
-        
-        /* Tabs */
-        .stTabs [data-baseweb="tab-list"] {
-            gap: 24px;
-        }
-        .stTabs [data-baseweb="tab"] {
-            height: 50px;
-            white-space: pre-wrap;
-            background-color: white;
-            border-radius: 4px;
-            color: #64748B;
-            font-weight: 600;
-        }
-        .stTabs [aria-selected="true"] {
-            background-color: #EFF6FF;
-            color: #2563EB;
-        }
-        </style>
-    """, unsafe_allow_html=True)
+# --- STYLING ---
+st.markdown("""
+    <style>
+    .main { background-color: #f8f9fa; }
+    .stButton>button { border-radius: 6px; height: 3em; font-weight: 600; width: 100%; }
+    .report-box { border: 1px solid #e0e0e0; padding: 20px; border-radius: 8px; background: white; margin-bottom: 15px; }
+    h1, h2, h3 { color: #2c3e50; font-family: 'Helvetica Neue', sans-serif; }
+    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
+    .stTabs [data-baseweb="tab"] { height: 45px; background-color: #fff; border-radius: 4px 4px 0px 0px; border: 1px solid #ddd; padding: 0 20px; }
+    .stTabs [aria-selected="true"] { background-color: #e8f0fe; color: #1a73e8; border-bottom: 2px solid #1a73e8; }
+    .metric-card { background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); text-align: center; }
+    </style>
+""", unsafe_allow_html=True)
 
-# --- SESSION MANAGEMENT ---
-def initialize_session_state():
+# --- AI ENGINE ---
+class AIClient:
+    def __init__(self):
+        self.enabled = bool(api_key)
+        if self.enabled:
+            genai.configure(api_key=api_key)
+            self.model = genai.GenerativeModel('gemini-2.5-flash-preview-09-2025')
+            self.vision = genai.GenerativeModel('gemini-2.5-flash-preview-09-2025')
+
+    def generate(self, prompt, temperature=0.7):
+        if not self.enabled: return "⚠️ AI Key Missing"
+        try:
+            return self.model.generate_content(prompt, generation_config={"temperature": temperature}).text
+        except Exception as e:
+            return f"AI Error: {e}"
+
+    def analyze_image(self, image, prompt):
+        if not self.enabled: return "⚠️ AI Key Missing"
+        try:
+            return self.vision.generate_content([prompt, image]).text
+        except Exception as e:
+            return f"Vision Error: {e}"
+
+if 'ai' not in st.session_state:
+    st.session_state.ai = AIClient()
+
+# --- UTILITIES ---
+def clean_text_for_export(text):
+    """Removes markdown artifacts for raw text export."""
+    if not text: return ""
+    text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)  # Bold
+    text = re.sub(r'\*(.*?)\*', r'\1', text)      # Italic
+    text = re.sub(r'#+\s', '', text)              # Headers
+    text = re.sub(r'__', '', text)                # Underscores
+    text = re.sub(r'`', '', text)                 # Code ticks
+    return text.strip()
+
+def smart_odoo_parser(file):
+    """
+    Intelligently finds the header row in poorly structured Odoo CSV/Excel exports.
+    """
+    try:
+        content = file.getvalue().decode("utf-8", errors='replace')
+        lines = content.split('\n')
+        
+        # Odoo often has metadata in the first few lines. We look for the header.
+        # Keywords commonly found in Odoo headers
+        keywords = ['id', 'date', 'product', 'sku', 'qty', 'quantity', 'status', 'name', 'reference', 'priority', 'stage', 'ticket']
+        
+        best_idx = 0
+        max_score = 0
+        
+        # Scan first 20 lines
+        for i, line in enumerate(lines[:20]):
+            score = sum(1 for k in keywords if k in line.lower())
+            if score > max_score:
+                max_score = score
+                best_idx = i
+        
+        # Reload with correct header
+        file.seek(0)
+        df = pd.read_csv(file, header=best_idx)
+        
+        # Cleanup: Drop rows that are entirely empty or just summary lines
+        df = df.dropna(how='all')
+        # Filter out rows where 'Product' or key ID fields are empty if possible
+        return df, None
+    except Exception as e:
+        return None, str(e)
+
+# --- MODULE 1: DASHBOARD ---
+def render_dashboard():
+    st.title("📊 Product Lifecycle Intelligence")
+    
+    # Metrics Row
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.markdown('<div class="metric-card"><h3>4.2</h3><p>Avg Star Rating</p></div>', unsafe_allow_html=True)
+    with c2:
+        st.markdown('<div class="metric-card"><h3>12%</h3><p>Return Rate (Last 30d)</p></div>', unsafe_allow_html=True)
+    with c3:
+        st.markdown('<div class="metric-card"><h3>5</h3><p>Open CAPAs</p></div>', unsafe_allow_html=True)
+    with c4:
+        st.markdown('<div class="metric-card"><h3>2</h3><p>Draft Quality Plans</p></div>', unsafe_allow_html=True)
+    
+    st.markdown("---")
+    
+    # Quick Launch
+    st.subheader("⚡ Active Workflows")
+    col1, col2, col3 = st.columns(3)
+    if col1.button("🛠️ New Product Plan"):
+        st.session_state.nav = "Quality Planning"
+        st.rerun()
+    if col2.button("📢 Analyze Feedback"):
+        st.session_state.nav = "Market Intelligence"
+        st.rerun()
+    if col3.button("🛡️ Log New CAPA"):
+        st.session_state.nav = "CAPA Manager"
+        st.rerun()
+
+    # Activity Chart
+    st.markdown("### 📈 Quality Event Trends")
+    data = pd.DataFrame({
+        "Date": pd.date_range(start="2025-01-01", periods=8, freq="W"),
+        "Complaints": [12, 15, 8, 20, 10, 5, 12, 8],
+        "CAPAs Closed": [2, 1, 4, 0, 3, 2, 1, 3]
+    })
+    fig = px.line(data, x="Date", y=["Complaints", "CAPAs Closed"], markers=True, color_discrete_sequence=["#e74c3c", "#2ecc71"])
+    st.plotly_chart(fig, use_container_width=True)
+
+# --- MODULE 2: QUALITY PLANNING ---
+def render_quality_planning():
+    st.title("🛠️ Quality Project Planner")
+    st.markdown("Define quality strategy from concept to launch. **Lock** sections you write manually; let AI fill the rest.")
+
+    # Data State
     defaults = {
-        'ai_analyzer': EnhancedAIAnalyzer() if MODULES_LOADED else None,
-        'upload_handler': UploadHandler() if MODULES_LOADED else None,
-        'dashboard': SimpleDashboard() if MODULES_LOADED else None,
-        'qpp_data': None,           # Stores the generated Quality Project Plan
-        'review_data': None,        # Stores processed review data
-        'qpp_chat_history': [],     # Chat history for QPP mode
-        'review_chat_history': [],  # Chat history for Review mode
-        'current_mode': 'Quality Command Center',
-        'user_api_key': None
+        "qp_name": "", "qp_risk": "Class I", "qp_scope": "", "qp_regs": "", 
+        "qp_testing": "", "qp_vendor": "", "qp_path": ""
     }
+    for k, v in defaults.items():
+        if k not in st.session_state: st.session_state[k] = v
+
+    # 1. Project Context
+    with st.expander("📝 Project Context", expanded=True):
+        c1, c2, c3 = st.columns([2, 1, 1])
+        st.session_state.qp_name = c1.text_input("Project Name/SKU", st.session_state.qp_name)
+        st.session_state.qp_risk = c2.selectbox("Risk Level", ["Class I (Low)", "Class II (Med)", "Class III (High)"], index=0)
+        mkts = c3.multiselect("Target Markets", ["USA (FDA)", "EU (MDR)", "UK", "Canada"])
+
+    # 2. Planning Sections
+    col_edit, col_view = st.columns([1.2, 1])
     
-    for key, value in defaults.items():
-        if key not in st.session_state:
-            st.session_state[key] = value
+    sections = [
+        ("scope", "Scope & Objectives", "Define boundaries, deliverables, and success criteria."),
+        ("regs", "Regulatory Strategy", "Applicable standards (ISO 13485, FDA 21 CFR, ASTM)."),
+        ("testing", "Testing & Validation Plan", "Mechanical, Chemical, User Testing requirements."),
+        ("vendor", "Supply Chain & Vendor Controls", "IQC, AQL levels, Supplier Audits."),
+        ("path", "Critical Path & Timeline", "Key milestones: Proto, Tooling, Pilot, Launch.")
+    ]
+    
+    generated_content = {}
 
-def check_api_status():
-    """Robust check for API availability"""
-    if st.session_state.ai_analyzer:
-        status = st.session_state.ai_analyzer.get_api_status()
-        return status.get('available', False)
-    return False
-
-# --- MODULE 1: QUALITY COMMAND CENTER ---
-def render_quality_command_center():
-    st.markdown("""
-    <div class="header-container">
-        <h1>🚀 Quality Command Center</h1>
-        <p>ISO 13485 Aligned Project Execution • Regulatory Strategy • Risk Management</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # 1. Screening Gate (Part 0)
-    with st.expander("📋 Part 0: Project Screening Gate (Mandatory)", expanded=not st.session_state.qpp_data):
-        st.write("Answer the following to determine the regulatory pathway:")
-        
-        c1, c2 = st.columns(2)
-        with c1:
-            q1 = st.checkbox("1. Is the device sterile?", help="Requires sterilization validation (ISO 11135/11137)")
-            q2 = st.checkbox("2. Class I w/ special controls, Class II, or higher?", help="Requires full Design Controls (21 CFR 820.30)")
-            q3 = st.checkbox("3. Active instrument or software-driven?", help="Requires IEC 60601 / IEC 62304")
-        with c2:
-            q4 = st.checkbox("4. Mobility item (supports weight/movement)?", help="High liability risk")
-            q5 = st.checkbox("5. Complex moving parts (e.g., Knee Brace)?", help="Mechanical failure risk")
-            q6 = st.checkbox("6. High financial risk project?", help="Significant CAPEX or inventory investment")
-
-        # Logic based on PDF
-        is_critical = any([q1, q2, q3, q4, q5, q6])
-        
-        if is_critical:
-            st.markdown("""
-            <div class="rec-banner-red">
-                <h3>🔴 Pathway: Critical Path (Comprehensive)</h3>
-                <p>This project requires the <b>Full 5-Part QPP</b> to meet ISO/FDA regulatory standards.</p>
-            </div>
-            """, unsafe_allow_html=True)
-            default_index = 0
-        else:
-            st.markdown("""
-            <div class="rec-banner-green">
-                <h3>🟢 Pathway: Fast Track (Streamlined)</h3>
-                <p>This project qualifies for the <b>Streamlined QPP</b> (Charter + Risk Summary).</p>
-            </div>
-            """, unsafe_allow_html=True)
-            default_index = 1
-
-    st.divider()
-
-    # 2. Input & Generation
-    col_input, col_output = st.columns([1, 1.5])
-
-    with col_input:
-        st.markdown("### 📝 Project Definition")
-        with st.form("qpp_gen_form"):
-            mode_select = st.radio(
-                "Confirm Planning Mode:", 
-                ["Critical Path (Comprehensive)", "Fast Track (Streamlined)"],
-                index=default_index
-            )
+    with col_edit:
+        st.subheader("Drafting")
+        with st.form("qp_form"):
+            locks = {}
+            for code, title, hint in sections:
+                st.markdown(f"**{title}**")
+                # Lock Checkbox
+                locks[code] = st.checkbox(f"🔒 Lock/Preserve {title}", key=f"lock_{code}", help="Check to keep your text exactly as is. Uncheck to let AI optimize or generate.")
+                
+                # Text Area
+                st.session_state[f"qp_{code}"] = st.text_area(
+                    hint, 
+                    value=st.session_state[f"qp_{code}"], 
+                    height=100,
+                    key=f"input_{code}",
+                    label_visibility="collapsed"
+                )
+                st.markdown("---")
             
-            p_name = st.text_input("Product Name", placeholder="e.g., Post-Op Shoe V2")
-            p_time = st.text_input("Target Timeline", placeholder="e.g., Launch Q3 2025")
-            p_goal = st.text_area("Primary Goal / Problem Statement", 
-                                 placeholder="e.g., Reduce return rate from 12% to <7% by fixing sizing chart.",
-                                 height=120)
-            
-            submit = st.form_submit_button("✨ Generate Quality Plan", type="primary")
+            gen_btn = st.form_submit_button("✨ Generate / Optimize Plan")
 
-        if submit and p_name and p_goal:
-            if not check_api_status():
-                st.error("❌ OpenAI API Key missing. Please configure in Sidebar.")
+    if gen_btn:
+        with st.spinner("AI is analyzing dependencies and filling gaps..."):
+            # Build Context
+            context_str = f"Project: {st.session_state.qp_name}. Risk: {st.session_state.qp_risk}. Markets: {', '.join(mkts)}.\n"
+            
+            # Add User Input to Context
+            for code, title, _ in sections:
+                val = st.session_state[f"qp_{code}"]
+                if val:
+                    context_str += f"User Input for {title}: {val}\n"
+
+            # Generate
+            for code, title, _ in sections:
+                current_val = st.session_state[f"qp_{code}"]
+                is_locked = locks[code]
+
+                if is_locked:
+                    # Keep exact
+                    generated_content[code] = current_val
+                else:
+                    # Generate or Optimize
+                    if not current_val:
+                        prompt = f"Write a professional '{title}' section for a {st.session_state.qp_risk} medical/consumer device project named {st.session_state.qp_name}. Context: {context_str}. Do NOT use markdown formatting like bold or headers."
+                    else:
+                        prompt = f"Optimize this text for a Quality Plan (make it professional, clear, and compliant): '{current_val}'. Context: {context_str}. Do NOT use markdown formatting."
+                    
+                    # Call AI
+                    resp = st.session_state.ai.generate(prompt)
+                    st.session_state[f"qp_{code}"] = resp
+                    generated_content[code] = resp
+                    time.sleep(0.5) # Rate limit buffer
+            
+            st.success("Plan Updated!")
+            st.rerun()
+
+    # 3. Preview & Export
+    with col_view:
+        st.subheader("📄 Live Preview (Clean)")
+        
+        full_doc = f"PROJECT QUALITY PLAN: {st.session_state.qp_name.upper()}\n"
+        full_doc += f"DATE: {datetime.now().strftime('%Y-%m-%d')}\n"
+        full_doc += f"RISK LEVEL: {st.session_state.qp_risk} | MARKETS: {', '.join(mkts)}\n\n"
+        
+        for code, title, _ in sections:
+            content = st.session_state.get(f"qp_{code}", "")
+            clean_content = clean_text_for_export(content)
+            full_doc += f"{title.upper()}\n{'-'*len(title)}\n{clean_content}\n\n"
+        
+        st.text_area("Final Document", value=full_doc, height=600, disabled=True)
+        
+        c_ex1, c_ex2 = st.columns(2)
+        c_ex1.download_button("📥 Download .txt (Raw)", full_doc, file_name=f"{st.session_state.qp_name}_Plan.txt")
+        c_ex2.download_button("📥 Download .md (Markdown)", full_doc, file_name=f"{st.session_state.qp_name}_Plan.md")
+
+# --- MODULE 3: MARKET INTELLIGENCE ---
+def render_market_intel():
+    st.title("🌐 Market Intelligence & Supply Chain")
+    
+    tabs = st.tabs(["📢 Amazon VoC & Vision", "📦 Odoo Supply Chain"])
+
+    # --- TAB A: AMAZON VOC ---
+    with tabs[0]:
+        st.markdown("Analyze Customer Sentiment from Screenshots (Review Dashboards, Return Reports) or Text.")
+        
+        col_v1, col_v2 = st.columns([1, 1.5])
+        
+        with col_v1:
+            st.subheader("Input")
+            upload_src = st.file_uploader("Upload Screenshot or Review Image", type=['png', 'jpg', 'jpeg'])
+            
+            if upload_src:
+                img = Image.open(upload_src)
+                st.image(img, caption="Review Source", use_column_width=True)
+                
+                if st.button("🔍 Analyze Screenshot"):
+                    with st.spinner("Vision AI is reading data points..."):
+                        prompt = """
+                        Analyze this Amazon/Voice of Customer screenshot.
+                        1. Extract any visible Star Ratings or NCX rates.
+                        2. Summarize the main negative trends or keywords.
+                        3. Classify top issues (e.g., "Broken Parts", "Wrong Size", "Shipping Damage").
+                        4. Provide a sentiment score (1-10).
+                        """
+                        res = st.session_state.ai.analyze_image(img, prompt)
+                        st.session_state.voc_result = res
+                        st.session_state.voc_context = res # Save for chat
+
+        with col_v2:
+            st.subheader("Analysis & Chat")
+            if 'voc_result' in st.session_state:
+                with st.container(height=300, border=True):
+                    st.markdown(st.session_state.voc_result)
+                
+                # Chat Interface
+                st.markdown("#### 💬 Ask Questions about this Data")
+                user_q = st.text_input("Ex: 'How many users mentioned broken wheels?'")
+                if user_q and 'voc_context' in st.session_state:
+                    with st.spinner("Thinking..."):
+                        chat_prompt = f"Context: {st.session_state.voc_context}. User Question: {user_q}. Answer:"
+                        ans = st.session_state.ai.generate(chat_prompt)
+                        st.info(ans)
+                
+                st.divider()
+                if st.button("🚨 Create CAPA from this Analysis"):
+                    st.session_state.capa_prefill = st.session_state.voc_result
+                    st.session_state.nav = "CAPA Manager"
+                    st.rerun()
             else:
-                internal_mode = "critical" if "Critical" in mode_select else "fast_track"
+                st.info("Upload an image to begin analysis.")
+
+    # --- TAB B: ODOO PARSER ---
+    with tabs[1]:
+        st.markdown("Upload Odoo Exports (Helpdesk Tickets, Inventory Forecast). **Auto-cleans garbage rows.**")
+        
+        o_file = st.file_uploader("Upload Odoo CSV/XLSX", type=['csv', 'xlsx'])
+        
+        if o_file:
+            df = None
+            err = None
+            
+            if o_file.name.endswith('.csv'):
+                df, err = smart_odoo_parser(o_file)
+            else:
+                try:
+                    df = pd.read_excel(o_file)
+                except Exception as e:
+                    err = str(e)
+            
+            if err:
+                st.error(f"Could not parse file: {err}")
+            elif df is not None:
+                st.success(f"Successfully parsed {len(df)} rows.")
                 
-                with st.spinner(f"🤖 Acting as Quality Director... Drafting {internal_mode} plan..."):
-                    try:
-                        generator = ProjectPlanGenerator(st.session_state.ai_analyzer.api_client)
-                        result = generator.generate_plan(p_name, p_goal, p_time, internal_mode)
-                        
-                        if result['success']:
-                            st.session_state.qpp_data = result
-                            st.session_state.qpp_chat_history = [{
-                                "role": "assistant",
-                                "content": f"I have generated the **{mode_select}** for **{p_name}**. Please review the document on the right. I am ready to help you refine specific sections (e.g., 'Expand the FMEA' or 'Add more User Needs')."
-                            }]
-                            st.toast("Plan Generated Successfully!", icon="✅")
-                        else:
-                            st.error("Generation failed. Please check API limits.")
-                    except Exception as e:
-                        st.error(f"Error: {str(e)}")
-
-    # 3. Output & Interaction
-    with col_output:
-        if st.session_state.qpp_data:
-            tab_doc, tab_chat = st.tabs(["📄 Plan Document", "💬 AI Assistant"])
-            
-            with tab_doc:
-                st.markdown(f"### {st.session_state.qpp_data['mode'].replace('_', ' ').title()} Plan")
-                st.markdown(st.session_state.qpp_data['content'])
-                st.download_button(
-                    "📥 Download Markdown",
-                    st.session_state.qpp_data['content'],
-                    file_name=f"QPP_{p_name.replace(' ','_')}.md"
-                )
-            
-            with tab_chat:
-                render_chat_interface(
-                    history_key='qpp_chat_history',
-                    context_prompt=f"You are a Quality Manager assistant. Context: {st.session_state.qpp_data['content']}"
-                )
-        else:
-            st.info("👈 Fill out the Project Definition to generate your Quality Plan.")
-
-# --- MODULE 2: REVIEW ANALYZER ---
-def render_review_analyzer():
-    st.markdown("""
-    <div class="header-container">
-        <h1>📊 Review Analyzer</h1>
-        <p>Voice of Customer (VoC) Analysis • Sentiment Tracking • Issue Detection</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # 1. Upload
-    uploaded_file = st.file_uploader("Upload Review Data (CSV/Excel)", type=['csv', 'xlsx', 'xls'])
-
-    if uploaded_file:
-        if st.session_state.review_data is None or uploaded_file.name != st.session_state.get('current_filename'):
-            with st.spinner("Processing Data..."):
-                file_bytes = uploaded_file.read()
-                result = st.session_state.upload_handler.process_structured_file(file_bytes, uploaded_file.name)
+                # Auto-detect file type
+                cols = [str(c).lower() for c in df.columns]
+                is_helpdesk = any(x in cols for x in ['ticket', 'priority', 'stage', 'subject'])
+                is_inventory = any(x in cols for x in ['forecast', 'on hand', 'qty', 'product title'])
                 
-                if result['success']:
-                    st.session_state.review_data = result
-                    st.session_state.current_filename = uploaded_file.name
-                    # Initialize chat for this file
-                    st.session_state.review_chat_history = [{
-                        "role": "assistant",
-                        "content": f"I've analyzed {uploaded_file.name}. I found {len(result.get('customer_feedback', {}).values())} products. Ask me about trends, top complaints, or specific ASINs."
-                    }]
-                else:
-                    st.error(f"Upload failed: {result.get('errors')}")
+                st.markdown(f"**Detected Type:** {'Helpdesk Support' if is_helpdesk else 'Inventory Forecast' if is_inventory else 'General Data'}")
+                
+                with st.expander("🔍 View Raw Data"):
+                    st.dataframe(df.head(50))
+                
+                # Analytics
+                c_o1, c_o2 = st.columns(2)
+                
+                with c_o1:
+                    if is_helpdesk:
+                        # Ticket Priority Distribution
+                        if 'priority' in [c.lower() for c in df.columns]:
+                            p_col = next(c for c in df.columns if c.lower() == 'priority')
+                            fig = px.pie(df, names=p_col, title="Tickets by Priority", hole=0.4)
+                            st.plotly_chart(fig, use_container_width=True)
+                    elif is_inventory:
+                        # Top Stock Levels
+                        if 'on hand' in [c.lower() for c in df.columns] or 'total units' in [c.lower() for c in df.columns]:
+                            q_col = next(c for c in df.columns if c.lower() in ['on hand', 'total units'])
+                            p_col = next((c for c in df.columns if c.lower() in ['product', 'product title', 'sku']), None)
+                            if p_col:
+                                top_10 = df.nlargest(10, q_col)
+                                fig = px.bar(top_10, x=p_col, y=q_col, title="Top 10 Inventory Levels")
+                                st.plotly_chart(fig, use_container_width=True)
 
-    # 2. Dashboard & Analysis
-    if st.session_state.review_data:
-        data = st.session_state.review_data
-        
-        # Run AI Analysis on the data (if not done)
-        if 'ai_analysis' not in data and check_api_status():
-             with st.spinner("Running AI Classification & CAPA Generation..."):
-                 # Extract reviews list from the complex dict structure
-                 raw_reviews = []
-                 for asin, reviews in data.get('customer_feedback', {}).items():
-                     raw_reviews.extend(reviews)
-                 
-                 # Analyze
-                 ai_results = st.session_state.ai_analyzer.analyze_reviews_comprehensive(
-                     {'name': 'Uploaded Product', 'category': 'Medical Device'}, 
-                     raw_reviews[:50] # Limit for speed/cost in demo
-                 )
-                 st.session_state.review_data['ai_analysis'] = ai_results
+                with c_o2:
+                    st.markdown("### 🤖 AI Insights")
+                    if st.button("Generate Operational Insights"):
+                        sample_data = df.head(20).to_string()
+                        prompt = f"Analyze this Odoo data sample (Type: {'Helpdesk' if is_helpdesk else 'Inventory'}). Identify anomalies, critical items, or trends. Data: {sample_data}"
+                        insight = st.session_state.ai.generate(prompt)
+                        st.markdown(insight)
 
-        # Layout
-        tab_dash, tab_chat = st.tabs(["📈 Dashboard", "💬 Data Chat"])
-        
-        with tab_dash:
-            st.session_state.dashboard.render_upload_status(data)
-            if 'ai_analysis' in data:
-                st.session_state.dashboard.render_analysis_overview({data.get('filename'): data['ai_analysis']})
-                st.session_state.dashboard.render_capa_recommendations({data.get('filename'): data['ai_analysis']})
-                st.session_state.dashboard.render_ai_insights({data.get('filename'): data['ai_analysis']})
-        
-        with tab_chat:
-            context_str = "You are a Data Analyst. User has uploaded review data."
-            if 'ai_analysis' in data:
-                context_str += f" AI Findings: {str(data['ai_analysis'].get('ai_insights', ''))}"
-            
-            render_chat_interface(
-                history_key='review_chat_history',
-                context_prompt=context_str
-            )
-
-# --- SHARED CHAT COMPONENT ---
-def render_chat_interface(history_key, context_prompt):
-    """Reusable chat component with history management"""
-    history = st.session_state[history_key]
+# --- MODULE 4: CAPA MANAGER ---
+def render_capa_manager():
+    st.title("🛡️ CAPA Management System")
     
-    # Display history
-    chat_container = st.container()
-    with chat_container:
-        for msg in history:
-            avatar = "🤖" if msg["role"] == "assistant" else "👤"
-            with st.chat_message(msg["role"], avatar=avatar):
-                st.markdown(msg["content"])
+    # Prefill from VoC if available
+    desc_val = ""
+    if 'capa_prefill' in st.session_state:
+        st.info("✨ Data pre-filled from Amazon VoC Analysis")
+        desc_val = st.session_state.capa_prefill
+        # Clear it so it doesn't persist forever
+        del st.session_state.capa_prefill
 
-    # Input
-    if prompt := st.chat_input("Type your message..."):
-        # Add user message
-        st.session_state[history_key].append({"role": "user", "content": prompt})
-        with st.chat_message("user", avatar="👤"):
-            st.markdown(prompt)
+    tabs = st.tabs(["1. Intake & Risk", "2. Root Cause (RCA)", "3. Action Plan", "4. Review & Close"])
 
-        # Generate response
-        with st.chat_message("assistant", avatar="🤖"):
-            message_placeholder = st.empty()
-            full_response = ""
-            
-            if not check_api_status():
-                st.error("AI Offline. Check API Key.")
-                return
+    with tabs[0]:
+        c1, c2 = st.columns(2)
+        c1.text_input("CAPA ID", value=f"CAPA-{int(time.time())}")
+        src = c1.selectbox("Source Channel", ["Amazon Returns", "B2B Feedback", "Internal Audit", "Supplier QC"])
+        c2.date_input("Date Opened")
+        c2.selectbox("Owner", ["Quality Engineer", "Product Manager", "Ops Lead"])
+        
+        st.text_area("Problem Description / Non-Conformance", value=desc_val, height=150)
+        
+        st.markdown("### Initial Risk Assessment")
+        r1, r2, r3 = st.columns(3)
+        r1.selectbox("Severity", ["Minor", "Major", "Critical"])
+        r2.selectbox("Occurrence", ["Rare", "Occasional", "Frequent"])
+        r3.selectbox("Detection", ["High", "Medium", "Low"])
 
-            try:
-                # Construct messages for API
-                api_messages = [{"role": "system", "content": context_prompt}]
-                # Add last 5 turns for context window management
-                api_messages.extend([
-                    {"role": m["role"], "content": m["content"]} 
-                    for m in st.session_state[history_key][-5:]
-                ])
-                
-                # Stream-like UX (simulated as API doesn't support stream=True in wrapper)
-                with st.spinner("Thinking..."):
-                    response = st.session_state.ai_analyzer.api_client.call_api(api_messages)
-                
-                if response['success']:
-                    full_response = response['result']
-                    message_placeholder.markdown(full_response)
-                    st.session_state[history_key].append({"role": "assistant", "content": full_response})
-                else:
-                    st.error("Error getting response from AI.")
-            except Exception as e:
-                st.error(f"Chat Error: {str(e)}")
+    with tabs[1]:
+        st.subheader("Root Cause Analysis")
+        rca_tool = st.radio("Tool", ["5 Whys", "Fishbone (Ishikawa)"], horizontal=True)
+        
+        if rca_tool == "5 Whys":
+            c_why, c_ai = st.columns([2, 1])
+            with c_why:
+                w1 = st.text_input("1. Why did it happen?")
+                w2 = st.text_input("2. Why did that happen?")
+                w3 = st.text_input("3. Why is that the case?")
+                w4 = st.text_input("4. Why?")
+                w5 = st.text_input("5. Why? (Root Cause)")
+            with c_ai:
+                st.info("💡 Need help?")
+                if st.button("Ask AI for Root Cause"):
+                    if w1 and w2:
+                        sugg = st.session_state.ai.generate(f"Based on these initial whys: '{w1}' -> '{w2}', suggest the likely root causes for a manufacturing/product issue.")
+                        st.write(sugg)
+                    else:
+                        st.warning("Fill in the first 2 Whys.")
 
-# --- MAIN APP LOGIC ---
+    with tabs[2]:
+        st.subheader("Correction & Prevention")
+        st.checkbox("Correction (Immediate Fix)")
+        st.checkbox("Corrective Action (Prevent Recurrence)")
+        st.checkbox("Preventive Action (Prevent Occurrence elsewhere)")
+        
+        st.text_area("Action Plan Details")
+        
+        st.markdown("#### FMEA Check")
+        st.write("Does this action introduce new risks?")
+        st.radio("New Risk?", ["No", "Yes - Require new FMEA"])
+
+    with tabs[3]:
+        st.subheader("Effectiveness Check")
+        st.date_input("Verification Date")
+        st.text_area("Evidence of Effectiveness")
+        
+        if st.button("Close CAPA", type="primary"):
+            st.balloons()
+            st.success("CAPA Record Closed & Archived.")
+
+# --- MAIN NAVIGATION ---
 def main():
-    load_css()
-    initialize_session_state()
+    if 'nav' not in st.session_state:
+        st.session_state.nav = "Dashboard"
 
-    # --- SIDEBAR NAVIGATION ---
     with st.sidebar:
-        st.title("🏥 Vive Health")
-        st.caption("Quality Assurance Platform v4.0")
+        st.image("https://img.icons8.com/fluency/96/polyclinic.png", width=60)
+        st.title("PLI System")
         
-        mode = st.radio("Select Module:", 
-            ["Quality Command Center", "Review Analyzer"],
-            captions=["Generate QPPs & Strategy", "Analyze Returns & VoC"]
-        )
+        menu_opts = ["Dashboard", "Quality Planning", "Market Intelligence", "CAPA Manager"]
         
-        st.divider()
+        # Sync session state with sidebar
+        sel = st.radio("Navigation", menu_opts, index=menu_opts.index(st.session_state.nav))
+        if sel != st.session_state.nav:
+            st.session_state.nav = sel
+            st.rerun()
         
-        # System Status
-        status = check_api_status()
-        if status:
-            st.success("✅ AI Engine Online")
-        else:
-            st.error("❌ AI Engine Offline")
-            api_key = st.text_input("Enter OpenAI API Key", type="password")
-            if api_key:
-                os.environ["OPENAI_API_KEY"] = api_key
-                st.rerun()
-        
-        st.info("💡 **Tip:** Use the Screening Gate in the Command Center to determine regulatory requirements.")
+        st.markdown("---")
+        st.caption("System Status: 🟢 Online")
+        if not api_key:
+            st.warning("⚠️ AI Key Not Found")
 
-    # --- ROUTING ---
-    if mode == "Quality Command Center":
-        render_quality_command_center()
-    elif mode == "Review Analyzer":
-        render_review_analyzer()
+    if st.session_state.nav == "Dashboard":
+        render_dashboard()
+    elif st.session_state.nav == "Quality Planning":
+        render_quality_planning()
+    elif st.session_state.nav == "Market Intelligence":
+        render_market_intel()
+    elif st.session_state.nav == "CAPA Manager":
+        render_capa_manager()
 
 if __name__ == "__main__":
     main()
