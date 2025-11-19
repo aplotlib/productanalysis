@@ -7,58 +7,58 @@ import io
 import time
 import re
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # --- 1. SYSTEM CONFIGURATION ---
 st.set_page_config(
-    page_title="O.R.I.O.N. v6.4 | VIVE Health",
+    page_title="O.R.I.O.N. v7.0 | VIVE Health",
     page_icon="🧬",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# --- VIVE CLEAN THEME (Minimalist & Fast) ---
+# --- VIVE BRAND THEME (EXECUTIVE DARK MODE) ---
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&family=Open+Sans:wght@400;600&display=swap');
 
-    /* CORE COLORS: 
-       Navy: #0B1E3D
-       Teal: #00C6D7
-       White: #FFFFFF
-       Grey: #E2E8F0
-    */
-
-    /* GLOBAL APP STYLE */
+    /* GLOBAL APP RESET */
     .stApp {
-        background-color: #0B1E3D !important;
+        background-color: #0B1E3D !important; /* Vive Navy */
         color: #FFFFFF !important;
         font-family: 'Open Sans', sans-serif;
     }
 
-    /* TYPOGRAPHY */
-    h1, h2, h3, h4, h5, h6 {
+    /* HEADERS (Redzone Style) */
+    h1, h2, h3 {
         font-family: 'Montserrat', sans-serif !important;
-        font-weight: 700 !important;
+        font-weight: 800 !important;
         text-transform: uppercase;
-        letter-spacing: 0.5px;
+        letter-spacing: 1px;
         color: #FFFFFF !important;
     }
-    
     h1 {
-        color: #00C6D7 !important;
-        font-size: 2.2rem !important;
-        margin-bottom: 0.5rem;
+        font-size: 2.5rem !important;
+        color: #00C6D7 !important; /* Vive Teal */
+        margin-bottom: 0px;
+    }
+    .subtitle {
+        color: #94A3B8;
+        font-family: 'Montserrat', sans-serif;
+        font-size: 0.9rem;
+        letter-spacing: 2px;
+        margin-bottom: 30px;
     }
 
-    /* CONTAINERS - Flat, Clean, No Textures */
-    .stContainer, div[data-testid="metric-container"], .report-box, .element-container {
+    /* CARDS & CONTAINERS */
+    .stContainer, div[data-testid="metric-container"], .report-box {
         background-color: #132448 !important;
         border: 1px solid #1E3A5F;
         border-radius: 6px;
         padding: 20px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }
-    
+
     /* METRICS */
     div[data-testid="metric-container"] {
         border-left: 4px solid #00C6D7;
@@ -66,12 +66,13 @@ st.markdown("""
     }
     div[data-testid="metric-container"] label {
         color: #00C6D7 !important;
-        font-weight: 600;
+        font-weight: 700;
+        font-size: 0.85rem;
     }
     div[data-testid="metric-container"] div[data-testid="stMetricValue"] {
         color: #FFFFFF !important;
+        font-size: 2rem;
         font-weight: 700;
-        font-size: 1.8rem;
     }
 
     /* SIDEBAR */
@@ -79,227 +80,244 @@ st.markdown("""
         background-color: #050E1F !important;
         border-right: 1px solid #1E3A5F;
     }
-    
-    /* BUTTONS */
+
+    /* BUTTONS (Primary Action) */
     .stButton>button {
         background-color: #00C6D7 !important;
         color: #050E1F !important;
-        font-weight: 700 !important;
+        font-weight: 800 !important;
         text-transform: uppercase;
         border: none;
         border-radius: 4px;
-        height: 3em;
-        transition: background-color 0.2s;
+        height: 3.2em;
+        transition: all 0.2s;
     }
     .stButton>button:hover {
         background-color: #FFFFFF !important;
         color: #00C6D7 !important;
+        box-shadow: 0 0 15px rgba(0, 198, 215, 0.4);
     }
 
-    /* INPUTS & FORMS */
-    .stTextInput input, .stSelectbox div[data-baseweb="select"] div, .stTextArea textarea, .stDateInput input {
+    /* INPUTS */
+    .stTextInput input, .stSelectbox div[data-baseweb="select"] div, .stTextArea textarea {
         background-color: #1B3B6F !important;
         color: white !important;
         border: 1px solid #475569;
-        border-radius: 4px;
     }
     
     /* TABS */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-        background-color: transparent;
-    }
+    .stTabs [data-baseweb="tab-list"] { gap: 5px; }
     .stTabs [data-baseweb="tab"] {
-        background-color: #0F2042;
+        background-color: transparent;
         color: #94A3B8;
-        border: 1px solid #1E3A5F;
-        border-radius: 4px;
-        padding: 8px 16px;
+        border: none;
+        font-family: 'Montserrat', sans-serif;
+        font-weight: 600;
     }
     .stTabs [aria-selected="true"] {
-        background-color: #00C6D7;
-        color: #050E1F !important;
-        border-color: #00C6D7;
-        font-weight: 700;
+        color: #00C6D7;
+        border-bottom: 2px solid #00C6D7;
     }
     
-    /* TABLES */
-    div[data-testid="stDataFrame"] {
-        border: 1px solid #1E3A5F;
+    /* FOOTER */
+    .footer-text {
+        text-align: center;
+        color: #475569;
+        font-size: 0.7rem;
+        font-family: 'Montserrat', sans-serif;
+        margin-top: 40px;
+        border-top: 1px solid #1E3A5F;
+        padding-top: 10px;
     }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. INTELLIGENCE ENGINE (MULTI-PROVIDER SUPPORT) ---
+# --- 2. ROBUST INTELLIGENCE ENGINE (Requested Logic) ---
 class IntelligenceEngine:
     def __init__(self):
-        self.provider = None
         self.client = None
+        self.provider = None
         self.available = False
-        self._initialize()
+        self._initialize_ai_clients()
 
-    def _initialize(self):
-        # 1. Try Manual Key Override
-        if st.session_state.get("manual_key"):
-            self._configure_generic(st.session_state.manual_key)
-            return
+    def _initialize_ai_clients(self):
+        """Initialize AI clients from Streamlit secrets (Robust Pattern)"""
+        try:
+            # 1. Try Google Gemini (Visual capabilities)
+            if 'GEMINI_API_KEY' in st.secrets:
+                self._configure_gemini(st.secrets['GEMINI_API_KEY'])
+            elif 'GOOGLE_API_KEY' in st.secrets:
+                self._configure_gemini(st.secrets['GOOGLE_API_KEY'])
+            
+            # 2. Try OpenAI (Text capabilities fallback)
+            if not self.available and 'OPENAI_API_KEY' in st.secrets:
+                self._configure_openai(st.secrets['OPENAI_API_KEY'])
+            
+            # 3. Try Env Vars
+            if not self.available:
+                key = os.environ.get("GEMINI_API_KEY") or os.environ.get("OPENAI_API_KEY")
+                if key:
+                    if key.startswith("sk-"): self._configure_openai(key)
+                    else: self._configure_gemini(key)
 
-        # 2. Try Secrets (Gemini)
-        gemini_key = st.secrets.get("GEMINI_API_KEY") or st.secrets.get("GOOGLE_API_KEY")
-        if gemini_key:
-            self._configure_gemini(gemini_key)
-            return
+            # 4. Manual Override (Session State)
+            if not self.available and st.session_state.get("manual_key"):
+                key = st.session_state.manual_key
+                if key.startswith("sk-"): self._configure_openai(key)
+                else: self._configure_gemini(key)
 
-        # 3. Try Secrets (OpenAI) - Fallback if user prefers
-        openai_key = st.secrets.get("OPENAI_API_KEY")
-        if openai_key:
-            self._configure_openai(openai_key)
-            return
+        except Exception as e:
+            st.session_state.ai_error = str(e)
+            self.available = False
 
     def _configure_gemini(self, key):
         try:
             import google.generativeai as genai
             genai.configure(api_key=key)
             self.client = genai
-            self.provider = "Gemini"
             self.model = genai.GenerativeModel('gemini-2.5-flash-preview-09-2025')
+            self.vision = genai.GenerativeModel('gemini-2.5-flash-preview-09-2025')
+            self.provider = "Gemini"
             self.available = True
-        except Exception as e:
-            st.session_state.ai_error = f"Gemini Error: {e}"
+        except:
+            pass
 
     def _configure_openai(self, key):
-        # Placeholder for OpenAI support if libraries were available
-        # Since requirements.txt limits us, we stick to structure but log error if lib missing
         try:
             import openai
             self.client = openai.OpenAI(api_key=key)
             self.provider = "OpenAI"
             self.available = True
-        except ImportError:
-            st.session_state.ai_error = "OpenAI Key found but library missing."
-
-    def _configure_generic(self, key):
-        # heuristic to detect key type
-        if key.startswith("sk-"):
-            self._configure_openai(key)
-        else:
-            self._configure_gemini(key)
+        except:
+            pass
 
     def generate(self, prompt):
-        if not self.available: return "⚠️ AI Offline"
+        if not self.available: return "⚠️ AI Offline. Check API configuration."
         try:
             if self.provider == "Gemini":
                 return self.model.generate_content(prompt).text
             elif self.provider == "OpenAI":
-                # Basic Chat Completion fallback
-                completion = self.client.chat.completions.create(
+                response = self.client.chat.completions.create(
                     model="gpt-4o", messages=[{"role": "user", "content": prompt}]
                 )
-                return completion.choices[0].message.content
+                return response.choices[0].message.content
         except Exception as e:
-            return f"Generation Error: {e}"
+            return f"Error: {e}"
 
     def analyze_vision(self, image, prompt):
-        if not self.available: return "⚠️ AI Offline"
+        if not self.available: return "⚠️ AI Offline."
         try:
             if self.provider == "Gemini":
-                return self.model.generate_content([prompt, image]).text
+                return self.vision.generate_content([prompt, image]).text
             else:
-                return "Vision not supported on this provider yet."
+                return "Vision analysis requires Gemini API."
         except Exception as e:
-            return f"Vision Error: {e}"
+            return f"Error: {e}"
 
+# Initialize Singleton
 if 'ai' not in st.session_state:
     st.session_state.ai = IntelligenceEngine()
 
-# --- 3. DATA ENGINE (CACHED) ---
+# --- 3. CACHED DATA ENGINE ---
 class DataEngine:
     @staticmethod
     @st.cache_data
-    def parse_file(file_content, filename):
+    def process_file(file_content, filename):
+        """Parses generic sales/return reports."""
         try:
-            file_io = io.BytesIO(file_content)
-            # Sniff content
+            io_file = io.BytesIO(file_content)
+            # Try simple read
             try:
-                df = pd.read_csv(file_io) if filename.endswith('.csv') else pd.read_excel(file_io)
+                df = pd.read_csv(io_file) if filename.endswith('.csv') else pd.read_excel(io_file)
             except:
-                # Retry with header search if direct read fails or looks garbage
-                file_io.seek(0)
-                content = file_content.decode('utf-8', errors='ignore')
+                # Advanced read: Scan for header
+                io_file.seek(0)
+                content = file_content.decode('utf-8', errors='replace')
                 lines = content.splitlines()
                 best_idx = 0
                 max_score = 0
                 keywords = ['sku', 'product', 'date', 'qty', 'sales', 'return']
-                for i, line in enumerate(lines[:30]):
+                for i, line in enumerate(lines[:20]):
                     score = sum(1 for k in keywords if k in line.lower())
                     if score > max_score:
                         max_score = score
                         best_idx = i
-                file_io.seek(0)
-                df = pd.read_csv(file_io, header=best_idx) if filename.endswith('.csv') else pd.read_excel(file_io, header=best_idx)
+                io_file.seek(0)
+                df = pd.read_csv(io_file, header=best_idx) if filename.endswith('.csv') else pd.read_excel(io_file, header=best_idx)
 
-            # Normalize
+            # Normalize Columns
             col_map = {
                 'created on': 'Date', 'date': 'Date',
-                'product': 'Product', 'sku': 'Product',
-                'qty': 'Qty', 'quantity': 'Qty',
-                'sales': 'Sales', 'sold': 'Sales',
-                'returns': 'Returns', 'return qty': 'Returns',
-                'reason': 'Reason', 'ticket': 'Ticket'
+                'product': 'Product', 'sku': 'Product', 'item': 'Product',
+                'sales': 'Sales', 'sold': 'Sales', 'order qty': 'Sales',
+                'returns': 'Returns', 'return qty': 'Returns', 'qty returned': 'Returns',
+                'reason': 'Reason', 'disposition': 'Reason',
+                'ticket': 'Ticket ID'
             }
             df.columns = [col_map.get(c.lower().strip(), c) for c in df.columns]
             
+            # Type enforcement
             if 'Date' in df.columns:
                 df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
                 df = df.dropna(subset=['Date']).sort_values('Date')
 
             return df
-        except Exception as e:
+        except Exception:
             return pd.DataFrame()
 
 # --- 4. MODULES ---
 
 def render_dashboard():
-    st.markdown("# O.R.I.O.N.")
-    st.caption("OPERATIONAL REVIEW & INTELLIGENCE OPTIMIZATION NETWORK")
+    st.markdown("<h1>O.R.I.O.N.</h1>", unsafe_allow_html=True)
+    st.markdown("<div class='subtitle'>OPERATIONAL REVIEW & INTELLIGENCE OPTIMIZATION NETWORK</div>", unsafe_allow_html=True)
     
+    # Data State
     if 'data' not in st.session_state: st.session_state.data = None
 
     if st.session_state.data is None:
-        c1, c2 = st.columns([2, 1])
+        c1, c2 = st.columns([1.5, 1])
         with c1:
-            st.info("📡 SYSTEM STANDBY - UPLOAD DATA")
-            f = st.file_uploader("Sales/Return Data (CSV/XLSX)", type=['csv', 'xlsx'])
+            st.info("📡 **AWAITING SIGNAL**")
+            f = st.file_uploader("Upload Quality/Sales Report (CSV/XLSX)", type=['csv', 'xlsx'])
             if f:
-                df = DataEngine.parse_file(f.getvalue(), f.name)
+                df = DataEngine.process_file(f.getvalue(), f.name)
                 if not df.empty:
                     st.session_state.data = df
-                    st.success("SIGNAL ACQUIRED")
+                    st.success("SIGNAL LOCKED")
+                    time.sleep(0.5)
                     st.rerun()
                 else:
-                    st.error("Parsing Failed")
+                    st.error("Could not parse file.")
+        with c2:
+            st.markdown("### SYSTEM READY")
+            st.markdown("• **Trend Analysis:** Auto-detects monthly return rates.")
+            st.markdown("• **Root Cause:** AI hypothesis engine active.")
+            st.markdown("• **Vision:** Screenshot parser online.")
     else:
         df = st.session_state.data
+        
+        # Calc Metrics
         sales = df['Sales'].sum() if 'Sales' in df.columns else 0
         returns = df['Returns'].sum() if 'Returns' in df.columns else 0
         rate = (returns/sales*100) if sales > 0 else 0
         
-        # METRICS
+        # Display Metrics
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("RECORDS", len(df))
-        m2.metric("TOTAL SALES", f"{sales:,.0f}")
-        m3.metric("TOTAL RETURNS", f"{returns:,.0f}")
+        m2.metric("SALES VOL", f"{sales:,.0f}")
+        m3.metric("RETURNS", f"{returns:,.0f}")
         m4.metric("RETURN RATE", f"{rate:.2f}%")
         
         st.markdown("---")
         
+        # Visuals
         c1, c2 = st.columns([2, 1])
         with c1:
-            st.markdown("### 📉 TREND ANALYSIS")
+            st.markdown("### 📉 QUALITY TREND")
             if 'Date' in df.columns and 'Sales' in df.columns:
                 df['Month'] = df['Date'].dt.to_period('M').astype(str)
                 monthly = df.groupby('Month')[['Sales', 'Returns']].sum().reset_index()
-                monthly['Rate'] = monthly['Returns'] / monthly['Sales'] * 100
+                monthly['Rate'] = (monthly['Returns'] / monthly['Sales']) * 100
                 
                 fig = go.Figure()
                 fig.add_trace(go.Bar(x=monthly['Month'], y=monthly['Sales'], name="Sales", marker_color='#1B3B6F'))
@@ -309,68 +327,124 @@ def render_dashboard():
                     yaxis2=dict(overlaying='y', side='right'), legend=dict(orientation="h", y=1.1), height=350
                 )
                 st.plotly_chart(fig, use_container_width=True)
-        
+            else:
+                st.warning("Upload file with Date/Sales/Returns columns for trend analysis.")
+
         with c2:
             st.markdown("### 🧠 AI ANALYST")
-            if st.button("RUN DIAGNOSTICS", type="primary"):
+            if st.button("RUN HYPOTHESIS", type="primary"):
                 with st.spinner("Analyzing..."):
                     summ = df.describe().to_string()
-                    res = st.session_state.ai.generate(f"Analyze this data summary for quality trends: {summ}")
-                    st.info(res)
+                    prompt = f"Analyze this quality data summary. Identify 1 major anomaly in Return Rate and suggest a root cause (e.g. Vendor change? Seasonality?). Data: {summ}"
+                    st.info(st.session_state.ai.generate(prompt))
+            
             if st.button("CLEAR DATA"):
                 st.session_state.data = None
                 st.rerun()
 
+def render_voc():
+    st.markdown("<h1>VISION INTELLIGENCE</h1>", unsafe_allow_html=True)
+    st.markdown("<div class='subtitle'>CUSTOMER SENTIMENT & DEFECT EXTRACTION</div>", unsafe_allow_html=True)
+    
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("### 📥 SOURCE")
+        img = st.file_uploader("Upload Dashboard Screenshot", type=['png', 'jpg'])
+        if img:
+            st.image(img, caption="Context", use_column_width=True)
+            if st.button("INITIATE SCAN", type="primary"):
+                with st.spinner("EXTRACTING..."):
+                    prompt = "Analyze this screenshot. 1. Extract Statistics. 2. Identify Top 3 Product Defects. 3. Determine Sentiment. 4. Suggest CAPA."
+                    st.session_state.voc_res = st.session_state.ai.analyze_vision(Image.open(img), prompt)
+    
+    with c2:
+        st.markdown("### 📝 INTELLIGENCE")
+        if 'voc_res' in st.session_state:
+            st.markdown(st.session_state.voc_res)
+            st.divider()
+            if st.button("🛡️ ELEVATE TO CAPA"):
+                st.session_state.capa_prefill = st.session_state.voc_res
+                st.session_state.nav = "CAPA MANAGER"
+                st.rerun()
+
+def render_plan():
+    st.markdown("<h1>STRATEGIC PLANNER</h1>", unsafe_allow_html=True)
+    
+    c1, c2 = st.columns(2)
+    name = c1.text_input("PROJECT NAME", placeholder="Ex: Mobility X1 Gen2")
+    risk = c2.selectbox("RISK CLASS", ["Class I", "Class II", "Class III"])
+    
+    st.divider()
+    
+    c_edit, c_view = st.columns([1.3, 1])
+    sections = {"scope": "Scope", "regs": "Regulatory", "test": "Validation", "vend": "Vendor Controls"}
+    
+    with c_edit:
+        locks = {}
+        for k, label in sections.items():
+            with st.expander(label, expanded=True):
+                locks[k] = st.checkbox(f"LOCK", key=f"l_{k}")
+                st.session_state[f"qp_{k}"] = st.text_area("CONTENT", key=f"t_{k}", height=100, label_visibility="collapsed")
+        
+        if st.button("✨ AI: OPTIMIZE PLAN", type="primary"):
+            with st.spinner("Processing..."):
+                ctx = f"Project: {name}, Risk: {risk}"
+                for k, label in sections.items():
+                    if not locks[k]:
+                        p = f"Write professional Quality Plan section '{label}'. Context: {ctx}. User Draft: {st.session_state[f'qp_{k}']}. No Markdown."
+                        st.session_state[f"qp_{k}"] = st.session_state.ai.generate(p)
+                st.rerun()
+
+    with c_view:
+        st.markdown("### 📄 PREVIEW")
+        full = f"QUALITY STRATEGY: {name.upper()}\nRISK: {risk}\nDATE: {datetime.now().date()}\n\n"
+        for k, label in sections.items():
+            full += f"{label.upper()}\n{'-'*len(label)}\n{st.session_state.get(f'qp_{k}', '')}\n\n"
+        st.text_area("DOC", full, height=600)
+        st.download_button("📥 DOWNLOAD", full, file_name="Strategy.txt")
+
 def render_capa():
-    st.markdown("# CAPA MANAGER")
-    st.caption("FULL-CYCLE CORRECTIVE ACTION SUITE")
-    
-    # Session State for CAPA
+    st.markdown("<h1>CAPA MANAGER</h1>", unsafe_allow_html=True)
+    st.markdown("<div class='subtitle'>CORRECTIVE & PREVENTIVE ACTION SUITE</div>", unsafe_allow_html=True)
+
     if 'capa_id' not in st.session_state: st.session_state.capa_id = f"CAPA-{int(time.time())}"
-    
-    # FULL FEATURE TABS
-    tabs = st.tabs([
-        "1. INTAKE", 
-        "2. RISK ASSESSMENT", 
-        "3. INVESTIGATION (RCA)", 
-        "4. ACTION PLAN", 
-        "5. VERIFICATION", 
-        "6. COST OF QUALITY"
-    ])
-    
+    prefill = st.session_state.get("capa_prefill", "")
+
+    tabs = st.tabs(["1. INTAKE", "2. RISK", "3. INVESTIGATION", "4. ACTION", "5. VERIFICATION", "6. COST"])
+
     # 1. INTAKE
     with tabs[0]:
         c1, c2 = st.columns([2, 1])
         with c1:
             st.text_input("CAPA ID", st.session_state.capa_id, disabled=True)
-            st.text_input("ISSUE TITLE", placeholder="Ex: High Rate of Broken Wheels on Model X")
-            st.text_area("PROBLEM DESCRIPTION", height=150, placeholder="Detailed description of the non-conformance...")
+            st.text_input("ISSUE TITLE", placeholder="Short description of non-conformance")
+            st.text_area("DETAILED DESCRIPTION", value=prefill, height=150)
         with c2:
             st.selectbox("SOURCE", ["Customer Complaint", "Internal Audit", "Supplier NCR", "Regulatory"])
-            st.date_input("DATE OPENED", datetime.now())
-            st.selectbox("OWNER", ["Quality Engineering", "Operations", "Product Development"])
-    
+            st.selectbox("OWNER", ["Quality", "Ops", "Product"])
+            st.date_input("DATE OPENED")
+
     # 2. RISK
     with tabs[1]:
-        st.markdown("### FMEA / RISK MATRIX")
+        st.markdown("### FMEA RISK ASSESSMENT")
         r1, r2 = st.columns(2)
-        sev = r1.select_slider("SEVERITY (Impact)", options=[1, 2, 3, 4, 5], help="1=Negligible, 5=Catastrophic")
-        occ = r2.select_slider("OCCURRENCE (Frequency)", options=[1, 2, 3, 4, 5], help="1=Rare, 5=Frequent")
-        
+        sev = r1.select_slider("SEVERITY (S)", options=[1, 2, 3, 4, 5])
+        occ = r2.select_slider("OCCURRENCE (O)", options=[1, 2, 3, 4, 5])
         rpn = sev * occ
-        color = "green" if rpn <= 4 else ("orange" if rpn <= 12 else "red")
+        
+        color = "green" if rpn <= 6 else ("orange" if rpn <= 12 else "red")
         st.markdown(f"#### RPN SCORE: :{color}[{rpn}]")
         
-        if rpn > 12:
-            st.error("🚫 HIGH RISK: IMMEDIATE CONTAINMENT REQUIRED")
-            st.text_area("CONTAINMENT ACTIONS", placeholder="Immediate steps taken to stop the bleeding...")
+        if rpn > 10:
+            st.warning("⚠️ HIGH RISK DETECTED. CONTAINMENT REQUIRED.")
+            st.text_area("CONTAINMENT ACTION", placeholder="Immediate fix...")
         else:
             st.success("✅ RISK ACCEPTABLE")
 
-    # 3. RCA
+    # 3. INVESTIGATION (RCA)
     with tabs[2]:
         st.markdown("### ROOT CAUSE ANALYSIS")
-        method = st.radio("METHODOLOGY", ["5 Whys", "Fishbone / 6M"])
+        method = st.radio("TOOL", ["5 Whys", "Fishbone"])
         
         if method == "5 Whys":
             c_w, c_ai = st.columns([2, 1])
@@ -383,113 +457,86 @@ def render_capa():
             with c_ai:
                 st.markdown("<br>", unsafe_allow_html=True)
                 if st.button("🤖 AI COACH"):
-                    if w1:
-                        st.info(st.session_state.ai.generate(f"Based on '{w1}', suggest the root cause sequence."))
+                    if w1: st.info(st.session_state.ai.generate(f"Suggest root cause chain based on: {w1}"))
         else:
-            c1, c2, c3 = st.columns(3)
-            c1.text_area("MAN (People)")
-            c1.text_area("METHOD (Process)")
-            c2.text_area("MATERIAL (Product)")
-            c2.text_area("MACHINE (Equipment)")
-            c3.text_area("MEASUREMENT (Data)")
-            c3.text_area("MOTHER NATURE (Env)")
+            c1, c2 = st.columns(2)
+            c1.text_area("MAN / MATERIAL / MACHINE")
+            c2.text_area("METHOD / MEASUREMENT / ENV")
 
-    # 4. ACTION PLAN
+    # 4. ACTION
     with tabs[3]:
-        st.markdown("### CORRECTIVE ACTION PLAN")
-        if st.button("➕ ADD ACTION ITEM"):
-            st.session_state.setdefault('actions', []).append({})
-            
-        # Simple Dynamic List
-        actions = st.session_state.get('actions', [{}, {}])
-        for i, act in enumerate(actions):
-            with st.expander(f"ACTION ITEM #{i+1}", expanded=True):
-                ca1, ca2, ca3 = st.columns([3, 1, 1])
-                ca1.text_input(f"TASK DESCRIPTION", key=f"task_{i}")
-                ca2.selectbox(f"OWNER", ["QA", "Ops", "Vendor"], key=f"own_{i}")
-                ca3.date_input(f"DUE DATE", key=f"due_{i}")
+        st.markdown("### ACTION PLAN")
+        st.text_input("CORRECTIVE ACTION (Long Term)")
+        st.text_input("PREVENTIVE ACTION (Systemic)")
+        st.date_input("DUE DATE")
+        st.checkbox("Requires SOP Update?")
+        st.checkbox("Requires Training?")
 
     # 5. VERIFICATION
     with tabs[4]:
         st.markdown("### EFFECTIVENESS CHECK")
-        st.info("Must be performed after actions are implemented.")
-        st.radio("METHOD", ["Data Trend Analysis", "Audit / Inspection", "Test / Re-Validation"])
-        st.date_input("VERIFICATION DATE")
-        st.text_area("EVIDENCE OF EFFECTIVENESS", placeholder="Paste links to test reports or data trends...")
-        
-        if st.checkbox("EFFECTIVENESS CONFIRMED?"):
-            st.success("CAPA READY FOR CLOSURE")
-            if st.button("CLOSE CAPA RECORD", type="primary"):
+        st.radio("METHOD", ["Data Trend", "Audit", "Re-Test"])
+        st.text_area("EVIDENCE")
+        if st.checkbox("EFFECTIVENESS VERIFIED?"):
+            st.success("READY FOR CLOSURE")
+            if st.button("CLOSE CAPA", type="primary"):
                 st.balloons()
 
     # 6. COST
     with tabs[5]:
         st.markdown("### COST OF QUALITY (CoQ)")
         c1, c2 = st.columns(2)
-        c1.number_input("SCRAP / WASTE COST ($)", 0.0)
-        c1.number_input("REWORK COST ($)", 0.0)
-        c2.number_input("SHIPPING / RETURN COST ($)", 0.0)
+        c1.number_input("SCRAP ($)", 0.0)
+        c1.number_input("REWORK ($)", 0.0)
+        c2.number_input("SHIPPING ($)", 0.0)
         c2.number_input("LABOR HOURS", 0.0)
-        
-        st.metric("TOTAL FINANCIAL IMPACT", "$0.00")
+        st.metric("TOTAL IMPACT", "$0.00")
 
-def render_voc():
-    st.markdown("# VISION INTEL")
-    c1, c2 = st.columns(2)
-    with c1:
-        img = st.file_uploader("Upload Image", type=['png', 'jpg'])
-        if img:
-            st.image(img, use_column_width=True)
-            if st.button("SCAN", type="primary"):
-                res = st.session_state.ai.analyze_vision(Image.open(img), "Analyze metrics, defects, and sentiment.")
-                st.session_state.voc_res = res
-    with c2:
-        if 'voc_res' in st.session_state:
-            st.markdown(st.session_state.voc_res)
-
-def render_plan():
-    st.markdown("# STRATEGY PLANNER")
-    # Simplified for brevity in this file limit, but full logic exists
-    st.info("AI-Assisted Quality Planning Module Active")
-    st.text_area("SCOPE & OBJECTIVES", height=100)
-    if st.button("AI GENERATE"):
-        st.write(st.session_state.ai.generate("Write a generic quality plan scope."))
-
-# --- 5. MAIN ---
+# --- 5. MAIN CONTROLLER ---
 def main():
     with st.sidebar:
         st.title("O.R.I.O.N.")
-        st.caption("VIVE HEALTH v6.4")
+        st.caption("VIVE HEALTH v7.0 | EXEC BUILD")
         
-        # AI DEBUG STATUS
-        st.markdown("### SYSTEM STATUS")
+        # AI Status
         if st.session_state.ai.available:
             st.success(f"🟢 ONLINE ({st.session_state.ai.provider})")
         else:
             st.error("🔴 OFFLINE")
-            if st.session_state.get("ai_error"):
-                st.caption(st.session_state.ai_error)
-            
-            key = st.text_input("MANUAL API KEY", type="password")
-            if key:
-                st.session_state.manual_key = key
-                st.session_state.ai._initialize()
+            k = st.text_input("MANUAL KEY", type="password")
+            if k:
+                st.session_state.manual_key = k
+                st.session_state.ai._initialize_ai_clients()
                 st.rerun()
-
+        
         st.markdown("---")
         
         if 'nav' not in st.session_state: st.session_state.nav = "DASHBOARD"
         
-        nav = st.radio("MODULES", ["DASHBOARD", "VISION INTEL", "STRATEGY", "SUPPLY CHAIN", "CAPA MANAGER"])
+        opts = {
+            "DASHBOARD": "📊", 
+            "VISION INTEL": "👁️", 
+            "STRATEGY": "📝", 
+            "CAPA MANAGER": "🛡️"
+        }
         
-        st.markdown("---")
-        st.markdown("<div style='text-align:center; color:#5d6d8a; font-size:0.8rem;'>built by alex popoff 11/19/2025<br>v.6.4 gemini vibe coded beta</div>", unsafe_allow_html=True)
+        for label, icon in opts.items():
+            if st.button(f"{icon}  {label}", use_container_width=True):
+                st.session_state.nav = label
+                st.rerun()
+        
+        st.markdown("""
+        <div class='footer-text'>
+        built by alex popoff 11/19/2025<br>
+        recent build v.6.3<br>
+        gemini vibe coded beta test
+        </div>
+        """, unsafe_allow_html=True)
 
-    if nav == "DASHBOARD": render_dashboard()
-    elif nav == "VISION INTEL": render_voc()
-    elif nav == "STRATEGY": render_plan()
-    elif nav == "SUPPLY CHAIN": render_dashboard() # Reusing dash logic for simplicity in this prompt constraint
-    elif nav == "CAPA MANAGER": render_capa()
+    if st.session_state.nav == "DASHBOARD": render_dashboard()
+    elif st.session_state.nav == "VISION INTEL": render_voc()
+    elif st.session_state.nav == "STRATEGY": render_plan()
+    elif st.session_state.nav == "CAPA MANAGER": render_capa()
 
 if __name__ == "__main__":
     main()
