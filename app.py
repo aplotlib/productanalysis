@@ -7,17 +7,18 @@ import io
 import time
 import re
 import os
+import gc
 from datetime import datetime
 
 # --- 1. SYSTEM CONFIGURATION ---
 st.set_page_config(
-    page_title="O.R.I.O.N. v7.0 | VIVE Health",
+    page_title="O.R.I.O.N. v8.0 | VIVE Health",
     page_icon="🧬",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# --- VIVE BRAND THEME (EXECUTIVE DARK MODE) ---
+# --- VIVE BRAND THEME (MINIMALIST PRODUCTION) ---
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&family=Open+Sans:wght@400;600&display=swap');
@@ -51,7 +52,7 @@ st.markdown("""
     }
 
     /* CARDS & CONTAINERS */
-    .stContainer, div[data-testid="metric-container"], .report-box {
+    .stContainer, div[data-testid="metric-container"], .report-box, .info-box {
         background-color: #132448 !important;
         border: 1px solid #1E3A5F;
         border-radius: 6px;
@@ -105,34 +106,14 @@ st.markdown("""
         border: 1px solid #475569;
     }
     
-    /* TABS */
-    .stTabs [data-baseweb="tab-list"] { gap: 5px; }
-    .stTabs [data-baseweb="tab"] {
-        background-color: transparent;
-        color: #94A3B8;
-        border: none;
-        font-family: 'Montserrat', sans-serif;
-        font-weight: 600;
-    }
-    .stTabs [aria-selected="true"] {
-        color: #00C6D7;
-        border-bottom: 2px solid #00C6D7;
-    }
-    
-    /* FOOTER */
-    .footer-text {
-        text-align: center;
-        color: #475569;
-        font-size: 0.7rem;
-        font-family: 'Montserrat', sans-serif;
-        margin-top: 40px;
-        border-top: 1px solid #1E3A5F;
-        padding-top: 10px;
+    /* PROGRESS BAR */
+    .stProgress > div > div {
+        background-color: #00C6D7 !important;
     }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. ROBUST INTELLIGENCE ENGINE (Requested Logic) ---
+# --- 2. INTELLIGENCE ENGINE (ROBUST) ---
 class IntelligenceEngine:
     def __init__(self):
         self.client = None
@@ -214,56 +195,85 @@ class IntelligenceEngine:
         except Exception as e:
             return f"Error: {e}"
 
+    def categorize_batch(self, batch_data):
+        """Optimized batch processor for Return Categorizer"""
+        if not self.available: return batch_data
+        
+        # Construct a batch prompt
+        prompt = "Categorize the following medical device complaints into: [Product Defects, Performance Issues, Missing Components, Design Issues, Stability Issues, Medical Concerns, Other]. Return ONLY the category name for each line.\n\n"
+        for item in batch_data:
+            prompt += f"- {item['complaint']}\n"
+            
+        try:
+            response = self.generate(prompt)
+            categories = response.strip().split('\n')
+            
+            # Map results back to batch
+            for i, item in enumerate(batch_data):
+                if i < len(categories):
+                    # Clean formatting bullets if AI adds them
+                    cat = categories[i].replace('- ', '').strip()
+                    item['category'] = cat
+                else:
+                    item['category'] = "Uncategorized"
+            return batch_data
+        except Exception as e:
+            print(f"Batch Error: {e}")
+            for item in batch_data: item['category'] = "Error"
+            return batch_data
+
 # Initialize Singleton
 if 'ai' not in st.session_state:
     st.session_state.ai = IntelligenceEngine()
 
-# --- 3. CACHED DATA ENGINE ---
+# --- 3. DATA ENGINE (PRODUCTION GRADE) ---
 class DataEngine:
     @staticmethod
-    @st.cache_data
-    def process_file(file_content, filename):
-        """Parses generic sales/return reports."""
+    def process_file_preserve_structure(file_content, filename):
+        """Reads file as string/object to preserve structure (00123 SKU issue)"""
         try:
-            io_file = io.BytesIO(file_content)
-            # Try simple read
-            try:
-                df = pd.read_csv(io_file) if filename.endswith('.csv') else pd.read_excel(io_file)
-            except:
-                # Advanced read: Scan for header
-                io_file.seek(0)
-                content = file_content.decode('utf-8', errors='replace')
-                lines = content.splitlines()
-                best_idx = 0
-                max_score = 0
-                keywords = ['sku', 'product', 'date', 'qty', 'sales', 'return']
-                for i, line in enumerate(lines[:20]):
-                    score = sum(1 for k in keywords if k in line.lower())
-                    if score > max_score:
-                        max_score = score
-                        best_idx = i
-                io_file.seek(0)
-                df = pd.read_csv(io_file, header=best_idx) if filename.endswith('.csv') else pd.read_excel(io_file, header=best_idx)
-
-            # Normalize Columns
-            col_map = {
-                'created on': 'Date', 'date': 'Date',
-                'product': 'Product', 'sku': 'Product', 'item': 'Product',
-                'sales': 'Sales', 'sold': 'Sales', 'order qty': 'Sales',
-                'returns': 'Returns', 'return qty': 'Returns', 'qty returned': 'Returns',
-                'reason': 'Reason', 'disposition': 'Reason',
-                'ticket': 'Ticket ID'
-            }
-            df.columns = [col_map.get(c.lower().strip(), c) for c in df.columns]
+            if filename.endswith('.csv'):
+                df = pd.read_csv(io.BytesIO(file_content), dtype=str)
+            elif filename.endswith(('.xlsx', '.xls')):
+                df = pd.read_excel(io.BytesIO(file_content), dtype=str)
+            elif filename.endswith('.txt'):
+                df = pd.read_csv(io.BytesIO(file_content), sep='\t', dtype=str)
+            else:
+                return None, None
             
-            # Type enforcement
-            if 'Date' in df.columns:
-                df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-                df = df.dropna(subset=['Date']).sort_values('Date')
+            # Map Columns (Column I = Complaint, K = Category)
+            col_map = {}
+            cols = df.columns.tolist()
+            
+            # Logic for user's specific template
+            if len(cols) >= 9: # At least up to I
+                col_map['complaint'] = cols[8] # Column I (0-index 8)
+                col_map['sku'] = cols[1] if len(cols) > 1 else None # Column B
+                
+                # Ensure K exists
+                if len(cols) > 10:
+                    col_map['category'] = cols[10]
+                else:
+                    # Add columns if needed
+                    while len(df.columns) < 11:
+                        df[f'Col_{len(df.columns)}'] = ''
+                    col_map['category'] = df.columns[10]
+                    
+            return df, col_map
+        except Exception as e:
+            return None, None
 
-            return df
-        except Exception:
-            return pd.DataFrame()
+    @staticmethod
+    def export_data(df):
+        output = io.BytesIO()
+        # Try Excel for best formatting
+        try:
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                df.to_excel(writer, index=False, sheet_name='Categorized')
+        except:
+            # Fallback CSV
+            df.to_csv(output, index=False)
+        return output.getvalue()
 
 # --- 4. MODULES ---
 
@@ -271,238 +281,204 @@ def render_dashboard():
     st.markdown("<h1>O.R.I.O.N.</h1>", unsafe_allow_html=True)
     st.markdown("<div class='subtitle'>OPERATIONAL REVIEW & INTELLIGENCE OPTIMIZATION NETWORK</div>", unsafe_allow_html=True)
     
-    # Data State
-    if 'data' not in st.session_state: st.session_state.data = None
-
-    if st.session_state.data is None:
-        c1, c2 = st.columns([1.5, 1])
-        with c1:
-            st.info("📡 **AWAITING SIGNAL**")
-            f = st.file_uploader("Upload Quality/Sales Report (CSV/XLSX)", type=['csv', 'xlsx'])
-            if f:
-                df = DataEngine.process_file(f.getvalue(), f.name)
-                if not df.empty:
-                    st.session_state.data = df
-                    st.success("SIGNAL LOCKED")
-                    time.sleep(0.5)
-                    st.rerun()
-                else:
-                    st.error("Could not parse file.")
-        with c2:
-            st.markdown("### SYSTEM READY")
-            st.markdown("• **Trend Analysis:** Auto-detects monthly return rates.")
-            st.markdown("• **Root Cause:** AI hypothesis engine active.")
-            st.markdown("• **Vision:** Screenshot parser online.")
-    else:
-        df = st.session_state.data
+    # Simple Executive Summary of the Categories if they exist
+    if 'categorized_data' in st.session_state and st.session_state.categorized_data is not None:
+        df = st.session_state.categorized_data
+        col_map = st.session_state.column_mapping
+        cat_col = col_map.get('category')
         
-        # Calc Metrics
-        sales = df['Sales'].sum() if 'Sales' in df.columns else 0
-        returns = df['Returns'].sum() if 'Returns' in df.columns else 0
-        rate = (returns/sales*100) if sales > 0 else 0
-        
-        # Display Metrics
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("RECORDS", len(df))
-        m2.metric("SALES VOL", f"{sales:,.0f}")
-        m3.metric("RETURNS", f"{returns:,.0f}")
-        m4.metric("RETURN RATE", f"{rate:.2f}%")
-        
-        st.markdown("---")
-        
-        # Visuals
-        c1, c2 = st.columns([2, 1])
-        with c1:
-            st.markdown("### 📉 QUALITY TREND")
-            if 'Date' in df.columns and 'Sales' in df.columns:
-                df['Month'] = df['Date'].dt.to_period('M').astype(str)
-                monthly = df.groupby('Month')[['Sales', 'Returns']].sum().reset_index()
-                monthly['Rate'] = (monthly['Returns'] / monthly['Sales']) * 100
-                
-                fig = go.Figure()
-                fig.add_trace(go.Bar(x=monthly['Month'], y=monthly['Sales'], name="Sales", marker_color='#1B3B6F'))
-                fig.add_trace(go.Scatter(x=monthly['Month'], y=monthly['Rate'], name="Rate %", yaxis="y2", line=dict(color='#00C6D7', width=3)))
-                fig.update_layout(
-                    template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                    yaxis2=dict(overlaying='y', side='right'), legend=dict(orientation="h", y=1.1), height=350
-                )
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.warning("Upload file with Date/Sales/Returns columns for trend analysis.")
-
-        with c2:
-            st.markdown("### 🧠 AI ANALYST")
-            if st.button("RUN HYPOTHESIS", type="primary"):
-                with st.spinner("Analyzing..."):
-                    summ = df.describe().to_string()
-                    prompt = f"Analyze this quality data summary. Identify 1 major anomaly in Return Rate and suggest a root cause (e.g. Vendor change? Seasonality?). Data: {summ}"
-                    st.info(st.session_state.ai.generate(prompt))
+        if cat_col:
+            counts = df[cat_col].value_counts()
+            total = len(df)
+            quality_issues = sum(1 for c in df[cat_col] if "Defect" in str(c) or "Quality" in str(c))
             
-            if st.button("CLEAR DATA"):
-                st.session_state.data = None
-                st.rerun()
+            m1, m2, m3 = st.columns(3)
+            m1.metric("TOTAL PROCESSED", total)
+            m2.metric("QUALITY FLAGS", quality_issues)
+            m3.metric("DEFECT RATE", f"{(quality_issues/total*100):.1f}%")
+            
+            st.markdown("### 📉 CATEGORY BREAKDOWN")
+            st.bar_chart(counts)
+    else:
+        st.info("👋 Welcome to O.R.I.O.N. v8.0. Go to **CATEGORIZER** to process return data.")
+
+def render_categorizer():
+    st.markdown("<h1>RETURN CATEGORIZER</h1>", unsafe_allow_html=True)
+    st.caption("PRODUCTION ENGINE v16.1 | COLUMN I → COLUMN K")
+    
+    # File Upload
+    f = st.file_uploader("Upload Return Report (Excel/CSV)", type=['xlsx', 'csv', 'txt'])
+    
+    if f:
+        if 'original_file' not in st.session_state or st.session_state.original_file != f.name:
+            df, col_map = DataEngine.process_file_preserve_structure(f.getvalue(), f.name)
+            if df is not None:
+                st.session_state.raw_df = df
+                st.session_state.col_map = col_map
+                st.session_state.original_file = f.name
+                st.session_state.processing_complete = False
+    
+    if 'raw_df' in st.session_state:
+        df = st.session_state.raw_df
+        col_map = st.session_state.col_map
+        
+        # Stats
+        c_col = col_map.get('complaint')
+        valid = df[df[c_col].notna() & (df[c_col] != '')].shape[0]
+        
+        st.markdown(f"""
+        <div class='info-box'>
+            <b>FILE LOCKED:</b> {st.session_state.original_file}<br>
+            <b>TOTAL ROWS:</b> {len(df):,}<br>
+            <b>VALID COMPLAINTS (COL I):</b> {valid:,}
+        </div>
+        """, unsafe_allow_html=True)
+        
+        if st.button(f"🚀 CATEGORIZE {valid:,} ROWS", type="primary"):
+            progress = st.progress(0)
+            status = st.empty()
+            
+            # Batch Processing Logic
+            batch_size = 50
+            complaint_col_idx = df.columns.get_loc(col_map['complaint'])
+            cat_col_idx = df.columns.get_loc(col_map['category'])
+            
+            valid_indices = df[df[col_map['complaint']].notna()].index.tolist()
+            total_batches = (len(valid_indices) + batch_size - 1) // batch_size
+            
+            processed_count = 0
+            
+            for i in range(0, len(valid_indices), batch_size):
+                batch_idxs = valid_indices[i:i+batch_size]
+                
+                # Prepare batch
+                batch_payload = []
+                for idx in batch_idxs:
+                    txt = str(df.iat[idx, complaint_col_idx])
+                    batch_payload.append({'index': idx, 'complaint': txt})
+                
+                # AI Call
+                results = st.session_state.ai.categorize_batch(batch_payload)
+                
+                # Update DF
+                for item in results:
+                    df.iat[item['index'], cat_col_idx] = item.get('category', 'Other')
+                
+                processed_count += len(batch_idxs)
+                progress.progress(processed_count / len(valid_indices))
+                status.text(f"Processed {processed_count}/{len(valid_indices)}...")
+                
+                # Garbage Collection
+                if i % 500 == 0: gc.collect()
+            
+            st.session_state.categorized_data = df
+            st.session_state.processing_complete = True
+            st.success("✅ CATEGORIZATION COMPLETE")
+            st.rerun()
+
+    # Download Section
+    if st.session_state.get('processing_complete'):
+        st.markdown("---")
+        st.markdown("### 📥 AUTO-DOWNLOAD")
+        
+        data = DataEngine.export_data(st.session_state.categorized_data)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M')
+        
+        st.download_button(
+            label="DOWNLOAD PROCESSED FILE",
+            data=data,
+            file_name=f"Categorized_Returns_{timestamp}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary",
+            use_container_width=True
+        )
+        st.caption("File includes all original columns + AI Categories in Column K.")
 
 def render_voc():
     st.markdown("<h1>VISION INTELLIGENCE</h1>", unsafe_allow_html=True)
-    st.markdown("<div class='subtitle'>CUSTOMER SENTIMENT & DEFECT EXTRACTION</div>", unsafe_allow_html=True)
-    
     c1, c2 = st.columns(2)
     with c1:
-        st.markdown("### 📥 SOURCE")
-        img = st.file_uploader("Upload Dashboard Screenshot", type=['png', 'jpg'])
+        img = st.file_uploader("Upload Screenshot", type=['png', 'jpg'])
         if img:
-            st.image(img, caption="Context", use_column_width=True)
-            if st.button("INITIATE SCAN", type="primary"):
-                with st.spinner("EXTRACTING..."):
-                    prompt = "Analyze this screenshot. 1. Extract Statistics. 2. Identify Top 3 Product Defects. 3. Determine Sentiment. 4. Suggest CAPA."
-                    st.session_state.voc_res = st.session_state.ai.analyze_vision(Image.open(img), prompt)
-    
+            st.image(img, use_column_width=True)
+            if st.button("SCAN", type="primary"):
+                res = st.session_state.ai.analyze_vision(Image.open(img), "Extract metrics, defects, and sentiment.")
+                st.session_state.voc_res = res
     with c2:
-        st.markdown("### 📝 INTELLIGENCE")
         if 'voc_res' in st.session_state:
             st.markdown(st.session_state.voc_res)
-            st.divider()
-            if st.button("🛡️ ELEVATE TO CAPA"):
+            if st.button("INITIATE CAPA"):
                 st.session_state.capa_prefill = st.session_state.voc_res
                 st.session_state.nav = "CAPA MANAGER"
                 st.rerun()
 
 def render_plan():
-    st.markdown("<h1>STRATEGIC PLANNER</h1>", unsafe_allow_html=True)
-    
+    st.markdown("<h1>STRATEGY PLANNER</h1>", unsafe_allow_html=True)
+    st.info("AI-Assisted Quality Planning Module")
     c1, c2 = st.columns(2)
-    name = c1.text_input("PROJECT NAME", placeholder="Ex: Mobility X1 Gen2")
-    risk = c2.selectbox("RISK CLASS", ["Class I", "Class II", "Class III"])
+    st.session_state.qp_name = c1.text_input("Project Name")
+    st.session_state.qp_risk = c2.selectbox("Risk", ["Class I", "Class II"])
     
-    st.divider()
-    
-    c_edit, c_view = st.columns([1.3, 1])
-    sections = {"scope": "Scope", "regs": "Regulatory", "test": "Validation", "vend": "Vendor Controls"}
-    
-    with c_edit:
-        locks = {}
-        for k, label in sections.items():
-            with st.expander(label, expanded=True):
-                locks[k] = st.checkbox(f"LOCK", key=f"l_{k}")
-                st.session_state[f"qp_{k}"] = st.text_area("CONTENT", key=f"t_{k}", height=100, label_visibility="collapsed")
-        
-        if st.button("✨ AI: OPTIMIZE PLAN", type="primary"):
-            with st.spinner("Processing..."):
-                ctx = f"Project: {name}, Risk: {risk}"
-                for k, label in sections.items():
-                    if not locks[k]:
-                        p = f"Write professional Quality Plan section '{label}'. Context: {ctx}. User Draft: {st.session_state[f'qp_{k}']}. No Markdown."
-                        st.session_state[f"qp_{k}"] = st.session_state.ai.generate(p)
-                st.rerun()
-
-    with c_view:
-        st.markdown("### 📄 PREVIEW")
-        full = f"QUALITY STRATEGY: {name.upper()}\nRISK: {risk}\nDATE: {datetime.now().date()}\n\n"
-        for k, label in sections.items():
-            full += f"{label.upper()}\n{'-'*len(label)}\n{st.session_state.get(f'qp_{k}', '')}\n\n"
-        st.text_area("DOC", full, height=600)
-        st.download_button("📥 DOWNLOAD", full, file_name="Strategy.txt")
+    with st.expander("SCOPE & OBJECTIVES", expanded=True):
+        st.text_area("Draft Content", height=100)
+        if st.button("AI OPTIMIZE"):
+            st.write(st.session_state.ai.generate("Write a quality plan scope"))
 
 def render_capa():
     st.markdown("<h1>CAPA MANAGER</h1>", unsafe_allow_html=True)
-    st.markdown("<div class='subtitle'>CORRECTIVE & PREVENTIVE ACTION SUITE</div>", unsafe_allow_html=True)
-
+    st.caption("CORRECTIVE & PREVENTIVE ACTION SUITE")
+    
     if 'capa_id' not in st.session_state: st.session_state.capa_id = f"CAPA-{int(time.time())}"
     prefill = st.session_state.get("capa_prefill", "")
 
     tabs = st.tabs(["1. INTAKE", "2. RISK", "3. INVESTIGATION", "4. ACTION", "5. VERIFICATION", "6. COST"])
 
-    # 1. INTAKE
     with tabs[0]:
         c1, c2 = st.columns([2, 1])
         with c1:
             st.text_input("CAPA ID", st.session_state.capa_id, disabled=True)
-            st.text_input("ISSUE TITLE", placeholder="Short description of non-conformance")
-            st.text_area("DETAILED DESCRIPTION", value=prefill, height=150)
+            st.text_area("DESCRIPTION", value=prefill, height=150)
         with c2:
-            st.selectbox("SOURCE", ["Customer Complaint", "Internal Audit", "Supplier NCR", "Regulatory"])
-            st.selectbox("OWNER", ["Quality", "Ops", "Product"])
-            st.date_input("DATE OPENED")
+            st.selectbox("SOURCE", ["Customer", "Audit", "NCR"])
+            st.selectbox("OWNER", ["QA", "Ops", "Product"])
 
-    # 2. RISK
     with tabs[1]:
-        st.markdown("### FMEA RISK ASSESSMENT")
+        st.markdown("### RISK MATRIX")
         r1, r2 = st.columns(2)
-        sev = r1.select_slider("SEVERITY (S)", options=[1, 2, 3, 4, 5])
-        occ = r2.select_slider("OCCURRENCE (O)", options=[1, 2, 3, 4, 5])
-        rpn = sev * occ
-        
-        color = "green" if rpn <= 6 else ("orange" if rpn <= 12 else "red")
-        st.markdown(f"#### RPN SCORE: :{color}[{rpn}]")
-        
-        if rpn > 10:
-            st.warning("⚠️ HIGH RISK DETECTED. CONTAINMENT REQUIRED.")
-            st.text_area("CONTAINMENT ACTION", placeholder="Immediate fix...")
-        else:
-            st.success("✅ RISK ACCEPTABLE")
+        sev = r1.select_slider("SEVERITY", options=[1, 2, 3, 4, 5])
+        occ = r2.select_slider("OCCURRENCE", options=[1, 2, 3, 4, 5])
+        st.metric("RPN", sev * occ)
 
-    # 3. INVESTIGATION (RCA)
     with tabs[2]:
-        st.markdown("### ROOT CAUSE ANALYSIS")
-        method = st.radio("TOOL", ["5 Whys", "Fishbone"])
-        
-        if method == "5 Whys":
-            c_w, c_ai = st.columns([2, 1])
-            with c_w:
-                w1 = st.text_input("1. WHY?")
-                w2 = st.text_input("2. WHY?")
-                w3 = st.text_input("3. WHY?")
-                w4 = st.text_input("4. WHY?")
-                w5 = st.text_input("5. WHY (ROOT CAUSE)?")
-            with c_ai:
-                st.markdown("<br>", unsafe_allow_html=True)
-                if st.button("🤖 AI COACH"):
-                    if w1: st.info(st.session_state.ai.generate(f"Suggest root cause chain based on: {w1}"))
-        else:
-            c1, c2 = st.columns(2)
-            c1.text_area("MAN / MATERIAL / MACHINE")
-            c2.text_area("METHOD / MEASUREMENT / ENV")
+        st.markdown("### RCA")
+        w1 = st.text_input("1. WHY?")
+        if st.button("AI COACH"):
+            st.info(st.session_state.ai.generate(f"Root cause for: {w1}"))
 
-    # 4. ACTION
     with tabs[3]:
-        st.markdown("### ACTION PLAN")
-        st.text_input("CORRECTIVE ACTION (Long Term)")
-        st.text_input("PREVENTIVE ACTION (Systemic)")
+        st.text_input("CORRECTIVE ACTION")
         st.date_input("DUE DATE")
-        st.checkbox("Requires SOP Update?")
-        st.checkbox("Requires Training?")
 
-    # 5. VERIFICATION
     with tabs[4]:
-        st.markdown("### EFFECTIVENESS CHECK")
-        st.radio("METHOD", ["Data Trend", "Audit", "Re-Test"])
-        st.text_area("EVIDENCE")
-        if st.checkbox("EFFECTIVENESS VERIFIED?"):
-            st.success("READY FOR CLOSURE")
-            if st.button("CLOSE CAPA", type="primary"):
-                st.balloons()
+        st.text_area("EVIDENCE OF EFFECTIVENESS")
+        if st.button("CLOSE CAPA"): st.balloons()
 
-    # 6. COST
     with tabs[5]:
-        st.markdown("### COST OF QUALITY (CoQ)")
-        c1, c2 = st.columns(2)
-        c1.number_input("SCRAP ($)", 0.0)
-        c1.number_input("REWORK ($)", 0.0)
-        c2.number_input("SHIPPING ($)", 0.0)
-        c2.number_input("LABOR HOURS", 0.0)
-        st.metric("TOTAL IMPACT", "$0.00")
+        st.number_input("COST OF QUALITY ($)", 0.0)
 
 # --- 5. MAIN CONTROLLER ---
 def main():
     with st.sidebar:
         st.title("O.R.I.O.N.")
-        st.caption("VIVE HEALTH v7.0 | EXEC BUILD")
+        st.caption("VIVE HEALTH v8.0 | EXEC BUILD")
         
         # AI Status
         if st.session_state.ai.available:
             st.success(f"🟢 ONLINE ({st.session_state.ai.provider})")
         else:
             st.error("🔴 OFFLINE")
+            if st.session_state.get("ai_error"):
+                st.caption(st.session_state.ai_error)
             k = st.text_input("MANUAL KEY", type="password")
             if k:
                 st.session_state.manual_key = k
@@ -515,6 +491,7 @@ def main():
         
         opts = {
             "DASHBOARD": "📊", 
+            "CATEGORIZER": "📂",
             "VISION INTEL": "👁️", 
             "STRATEGY": "📝", 
             "CAPA MANAGER": "🛡️"
@@ -526,14 +503,14 @@ def main():
                 st.rerun()
         
         st.markdown("""
-        <div class='footer-text'>
+        <div style='text-align:center; color:#5d6d8a; font-size:0.8rem; margin-top:30px;'>
         built by alex popoff 11/19/2025<br>
-        recent build v.6.3<br>
-        gemini vibe coded beta test
+        v.8.0 gemini vibe coded beta
         </div>
         """, unsafe_allow_html=True)
 
     if st.session_state.nav == "DASHBOARD": render_dashboard()
+    elif st.session_state.nav == "CATEGORIZER": render_categorizer()
     elif st.session_state.nav == "VISION INTEL": render_voc()
     elif st.session_state.nav == "STRATEGY": render_plan()
     elif st.session_state.nav == "CAPA MANAGER": render_capa()
