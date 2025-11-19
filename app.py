@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
+import graphviz
 from PIL import Image
 import io
 import re
@@ -38,78 +38,73 @@ st.markdown("""
     .brand-title { font-size: 2.2rem; font-weight: 800; color: var(--primary); letter-spacing: -0.5px; margin: 0; }
     .brand-subtitle { font-size: 0.9rem; color: #64748B; font-weight: 500; margin-top: 0.25rem; }
 
-    /* CARDS & CONTAINERS */
+    /* CARDS */
     .feature-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; padding: 24px; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
-    div[data-testid="metric-container"] { background-color: white; border: 1px solid #E2E8F0; padding: 15px; border-radius: 8px; }
     
     /* TABS */
     .stTabs [data-baseweb="tab-list"] { gap: 8px; }
     .stTabs [data-baseweb="tab"] { height: 45px; background-color: white; border-radius: 6px; border: 1px solid #E2E8F0; padding: 0 20px; }
     .stTabs [aria-selected="true"] { background-color: var(--accent); color: white; border-color: var(--accent); }
-
-    /* ALERTS */
-    .disclaimer-box { font-size: 0.8rem; color: #B45309; background-color: #FFFBEB; padding: 8px; border-radius: 4px; border: 1px solid #FCD34D; margin-bottom: 10px; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. INTELLIGENCE ENGINE (Dual Provider: Gemini/Vertex + OpenAI) ---
+# --- 3. INTELLIGENCE ENGINE (Gemini/Vertex + OpenAI) ---
 class IntelligenceEngine:
     def __init__(self):
         self.client = None
         self.provider = None
         self.model_name = None
         self.available = False
-        self.clients = {} 
-        self._initialize_all_clients()
+        self.manual_key = None # For runtime key entry
 
     def _get_key(self, names):
+        # Priority: Manual Entry -> Secrets -> Environment
+        if self.manual_key: return self.manual_key
         for name in names:
             if hasattr(st, "secrets") and name in st.secrets: return st.secrets[name]
             if os.environ.get(name): return os.environ.get(name)
         return None
 
-    def _initialize_all_clients(self):
-        # OpenAI
-        openai_key = self._get_key(["OPENAI_API_KEY", "openai_api_key"])
-        if openai_key:
-            try:
-                import openai
-                self.clients['openai'] = openai.OpenAI(api_key=openai_key)
-            except: pass
-        # Google Vertex / Gemini
-        google_key = self._get_key(["GOOGLE_API_KEY", "GEMINI_API_KEY", "google_api_key"])
-        if google_key:
-            try:
-                import google.generativeai as genai
-                genai.configure(api_key=google_key)
-                self.clients['google'] = genai
-            except: pass
-
-    def set_active_model(self, choice):
+    def configure_client(self, provider_choice, manual_key_input=None):
         self.available = False
-        if "Gemini" in choice or "Vertex" in choice:
-            if 'google' in self.clients:
-                self.provider = "Google Vertex/Gemini"
-                self.client = self.clients['google']
-                if "Pro" in choice: self.model_name = "gemini-1.5-pro"
-                elif "Flash" in choice: self.model_name = "gemini-1.5-flash"
-                else: self.model_name = "gemini-1.5-flash"
-                self.available = True
-        elif "GPT" in choice:
-            if 'openai' in self.clients:
-                self.provider = "OpenAI"
-                self.client = self.clients['openai']
-                if "4o" in choice: self.model_name = "gpt-4o"
-                else: self.model_name = "gpt-4o-mini"
-                self.available = True
-
-    def generate(self, prompt, temperature=0.3, json_mode=False):
-        if not self.available: return None if json_mode else "⚠️ AI Offline. Check API Keys."
+        self.manual_key = manual_key_input
         
         try:
-            if "Google" in self.provider:
+            if "Gemini" in provider_choice:
+                api_key = self._get_key(["GOOGLE_API_KEY", "GEMINI_API_KEY", "google_api_key"])
+                if api_key:
+                    import google.generativeai as genai
+                    genai.configure(api_key=api_key)
+                    self.client = genai
+                    self.provider = "Google Gemini"
+                    # Map selection to model ID
+                    if "Flash" in provider_choice: self.model_name = "gemini-1.5-flash"
+                    else: self.model_name = "gemini-1.5-pro"
+                    self.available = True
+                else:
+                    self.available = False 
+
+            elif "GPT" in provider_choice:
+                api_key = self._get_key(["OPENAI_API_KEY", "openai_api_key"])
+                if api_key:
+                    import openai
+                    self.client = openai.OpenAI(api_key=api_key)
+                    self.provider = "OpenAI"
+                    if "4o" in provider_choice: self.model_name = "gpt-4o"
+                    else: self.model_name = "gpt-4o-mini"
+                    self.available = True
+                else:
+                    self.available = False
+        except Exception as e:
+            st.error(f"Connection Error: {e}")
+            self.available = False
+
+    def generate(self, prompt, temperature=0.3, json_mode=False):
+        if not self.available: return None if json_mode else "⚠️ AI Offline. Please check API Key."
+        
+        try:
+            if "Gemini" in self.provider:
                 model = self.client.GenerativeModel(self.model_name)
-                # Gemini JSON mode handling via prompt engineering mostly, or generation_config
                 config = {'temperature': temperature}
                 if json_mode: config['response_mime_type'] = 'application/json'
                 
@@ -127,54 +122,28 @@ class IntelligenceEngine:
                 response = self.client.chat.completions.create(**kwargs)
                 return response.choices[0].message.content
         except Exception as e:
-            return f"Error: {str(e)}"
+            return f"Generation Error: {str(e)}"
 
     def analyze_image(self, image, prompt):
         if not self.available: return "AI Offline"
         try:
-            if "Google" in self.provider:
+            if "Gemini" in self.provider:
                 model = self.client.GenerativeModel(self.model_name)
                 response = model.generate_content([prompt, image])
                 return response.text
             elif "OpenAI" in self.provider:
-                return "Vision analysis currently optimized for Gemini models in this version."
+                # Fallback for OpenAI Vision if needed
+                return "Please use Gemini 1.5 Pro/Flash for best vision analysis."
         except Exception as e: return f"Vision Error: {e}"
 
-    def generate_capa_draft(self, context_data):
-        """Specific method for CAPA auto-filling"""
-        prompt = f"""
-        You are a Quality Assurance Expert (ISO 13485). Based on the following issue context, generate a JSON object for a CAPA form.
-        
-        Context:
-        Product: {context_data.get('product', 'N/A')}
-        Issue Description: {context_data.get('issue', 'N/A')}
-        Root Cause Hint: {context_data.get('cause_hint', 'Investigation needed')}
-        
-        Return JSON with exactly these keys:
-        - issue_description (Professional technical description)
-        - containment_action (Immediate fix)
-        - root_cause_analysis (Probable root causes using 5-Whys style)
-        - corrective_action (Long term fix)
-        - preventive_action (Systemic fix)
-        - effectiveness_plan (How to verify)
-        """
-        res = self.generate(prompt, temperature=0.4, json_mode=True)
-        try:
-            # Clean up Markdown code blocks if present
-            if "```json" in res: res = res.split("```json")[1].split("```")[0]
-            return json.loads(res)
-        except:
-            return None
-
-if 'ai' not in st.session_state or not hasattr(st.session_state.ai, 'clients'):
+if 'ai' not in st.session_state:
     st.session_state.ai = IntelligenceEngine()
 
-# --- 4. ADVANCED DATA HANDLER ---
+# --- 4. DATA HANDLER (Robust Odoo & Return Logic) ---
 class DataHandler:
-    
     @staticmethod
     def clean_sku(sku):
-        """Strip suffixes to find Parent SKU (e.g., MOB1027BLK -> MOB1027)"""
+        """Smart Parent SKU extraction (MOB1027BLK -> MOB1027)"""
         if pd.isna(sku): return "Unknown"
         sku = str(sku).upper().strip()
         match = re.match(r"^([A-Z]+[0-9]+)", sku)
@@ -182,52 +151,48 @@ class DataHandler:
 
     @staticmethod
     def load_and_merge(files, period_days=90):
-        """
-        Powerful merge logic:
-        1. Parses Odoo Forecasts (Sales) & Return Reports.
-        2. Filters Returns to exactly the last X days (1:1 comparison).
-        3. Groups by Parent SKU.
-        """
         master_data = {} # {Parent_SKU: {sales: 0, returns: 0, issues: []}}
         warnings = []
-        
         cutoff_date = datetime.now() - timedelta(days=period_days)
         
         for file in files:
             try:
-                # Intelligent Header Search
+                # Intelligent Header Hunt
                 raw = pd.read_excel(file, header=None)
                 header_idx = 0
                 for i in range(min(20, len(raw))):
-                    row_str = raw.iloc[i].astype(str).str.lower().to_list()
-                    if sum(1 for k in ['sku', 'product', 'asin', 'order', 'date'] if any(k in rs for rs in row_str)) >= 2:
+                    row_str = raw.iloc[i].astype(str).str.lower().tolist()
+                    # Look for row with at least 2 recognized keywords
+                    if sum(1 for k in ['sku', 'product', 'asin', 'order', 'date', 'qty', 'sales'] if any(k in str(rs) for rs in row_str)) >= 2:
                         header_idx = i
                         break
                 
                 df = pd.read_excel(file, header=header_idx)
                 df.columns = [str(c).strip() for c in df.columns]
                 
-                # Detect Type
+                # Detect File Type
                 fname = file.name.lower()
                 is_odoo = "odoo" in fname or "forecast" in fname
                 is_returns = "return" in fname or "pivot" in fname
                 
-                # Column Mapping
-                sku_col = next((c for c in df.columns if 'sku' in c.lower() or 'product' in c.lower() or 'default code' in c.lower()), None)
-                
+                sku_col = next((c for c in df.columns if any(x in c.lower() for x in ['sku', 'product', 'default code'])), None)
                 if not sku_col: continue
 
-                # --- ODOO LOGIC ---
+                # --- ODOO SALES LOGIC ---
                 if is_odoo:
-                    # Find the dynamic sales column (often Unnamed or specific to period)
+                    # Find Sales Column: prioritized check
                     sales_col = None
-                    for c in df.columns:
-                        # Look for numeric columns that might be sales
-                        if "unnamed" in c.lower() or "qty" in c.lower() or "sales" in c.lower():
-                             if pd.to_numeric(df[c], errors='coerce').sum() > 0:
-                                 sales_col = c
-                                 # If we find a likely candidate, stick with it (simple heuristic)
-                                 if "sales" in c.lower(): break 
+                    candidates = [c for c in df.columns if any(x in c.lower() for x in ['sales', 'qty', 'quantity', 'unnamed'])]
+                    
+                    # Filter for numeric candidates
+                    numeric_candidates = []
+                    for c in candidates:
+                        if pd.to_numeric(df[c], errors='coerce').sum() > 0:
+                            numeric_candidates.append(c)
+                    
+                    # Pick best candidate (prefer one with 'sales' in name, else take last numeric)
+                    if numeric_candidates:
+                        sales_col = next((c for c in numeric_candidates if 'sales' in c.lower()), numeric_candidates[-1])
                     
                     if sales_col:
                         for _, row in df.iterrows():
@@ -239,14 +204,14 @@ class DataHandler:
                 # --- RETURN REPORT LOGIC ---
                 elif is_returns:
                     date_col = next((c for c in df.columns if 'date' in c.lower()), None)
-                    reason_col = next((c for c in df.columns if 'reason' in c.lower() or 'comment' in c.lower()), None)
+                    reason_col = next((c for c in df.columns if any(x in c.lower() for x in ['reason', 'comment', 'review'])), None)
                     
                     if date_col:
                         df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
-                        # 1:1 Filtering
+                        # Strict 1:1 Date Filter
                         df = df[df[date_col] >= cutoff_date]
                     else:
-                        warnings.append(f"⚠️ No date column in {file.name}. Comparison may be inaccurate.")
+                        warnings.append(f"⚠️ {file.name}: No date column found. Filtering disabled.")
                         
                     for _, row in df.iterrows():
                         parent = DataHandler.clean_sku(row[sku_col])
@@ -256,256 +221,223 @@ class DataHandler:
                             master_data[parent]['issues'].append(str(row[reason_col]))
 
             except Exception as e:
-                warnings.append(f"Error processing {file.name}: {str(e)}")
+                warnings.append(f"Error {file.name}: {str(e)}")
 
-        # Convert to DataFrame
+        # Flatten
         rows = []
         for sku, data in master_data.items():
+            rate = (data['returns'] / data['sales'] * 100) if data['sales'] > 0 else 0
             rows.append({
                 'Parent_SKU': sku,
                 'Sales': data['sales'],
                 'Returns': data['returns'],
-                'Return_Rate': (data['returns'] / data['sales'] * 100) if data['sales'] > 0 else 0,
-                'Issues_List': data['issues']
+                'Return_Rate': rate,
+                'Issues': len(data['issues'])
             })
             
         return pd.DataFrame(rows), warnings
 
-# --- 5. UI SECTIONS ---
+# --- 5. MODULES ---
 
 def render_sidebar():
     with st.sidebar:
         st.markdown("### System Controls")
         
-        # AI Selector
-        st.markdown("**AI Intelligence Engine**")
-        model_options = []
-        if 'google' in st.session_state.ai.clients:
-            model_options.extend(["Google Vertex (Gemini 1.5 Pro)", "Google Vertex (Gemini 1.5 Flash)"])
-        if 'openai' in st.session_state.ai.clients:
-            model_options.extend(["OpenAI GPT-4o", "OpenAI GPT-4o Mini"])
+        # 1. AI Configuration
+        st.markdown("**AI Configuration**")
+        model_choice = st.selectbox(
+            "Select Provider", 
+            ["Google Gemini 1.5 Flash", "Google Gemini 1.5 Pro", "OpenAI GPT-4o", "OpenAI GPT-4o Mini"],
+            index=0
+        )
+        
+        # Check for Key (Logic: Check Secrets -> If Missing, Show Input)
+        has_secret = False
+        if "Gemini" in model_choice:
+            has_secret = "GOOGLE_API_KEY" in st.secrets or "GEMINI_API_KEY" in st.secrets
+        elif "GPT" in model_choice:
+            has_secret = "OPENAI_API_KEY" in st.secrets
             
-        if not model_options:
-            st.error("No API Keys Found")
-            st.caption("Check .streamlit/secrets.toml")
-        else:
-            # Default to Gemini Pro
-            idx = 0
-            for i, m in enumerate(model_options):
-                if "Gemini 1.5 Pro" in m: idx = i
-            
-            choice = st.selectbox("Active Model", model_options, index=idx, label_visibility="collapsed")
-            st.session_state.ai.set_active_model(choice)
-            
-            # Status
-            color = "#DBEAFE" if "Google" in choice else "#DCFCE7"
-            text = "#1E40AF" if "Google" in choice else "#166534"
-            st.markdown(f"""
-            <div style='background-color:{color}; color:{text}; padding:8px; border-radius:6px; font-size:0.8rem; font-weight:600;'>
-                ● {choice} Online
-            </div>
-            """, unsafe_allow_html=True)
-
+        manual_key = None
+        if not has_secret:
+            st.warning(f"No API key found for {model_choice.split()[0]}.")
+            manual_key = st.text_input("Enter API Key", type="password")
+        
+        # Initialize AI
+        st.session_state.ai.configure_client(model_choice, manual_key)
+        
+        if st.session_state.ai.available:
+            st.markdown(f"<span style='color:green'>● {model_choice} Connected</span>", unsafe_allow_html=True)
+        
         st.markdown("---")
         
-        # Reporting Period
-        st.markdown("**Analysis Period**")
-        st.caption("Aligns Sales & Returns 1:1")
-        days = st.selectbox("Time Window", [30, 60, 90, 180, 365], index=2)
+        # 2. Period Settings
+        st.markdown("**Reporting Period**")
+        st.caption("Select the window for Sales & Returns (1:1)")
+        days = st.selectbox("Input report period", [30, 60, 90, 180, 365], index=2)
         st.session_state.period_days = days
         
         st.markdown("---")
         nav = st.radio("Navigation", ["Dashboard", "Data Ingestion", "Vision", "CAPA Manager", "Strategy"], label_visibility="collapsed")
         return nav
 
-def render_header(title):
-    st.markdown(f"""
-    <div class="brand-header">
-        <div class="brand-title">ORION</div>
-        <div class="brand-subtitle">Operational Review & Intelligence Optimization Network</div>
-    </div>
-    <h3>{title}</h3>
-    """, unsafe_allow_html=True)
-
 def render_ingestion():
-    render_header("Data Ingestion")
-    st.markdown("""
-    <div class="feature-card">
-        <b>Upload Reports</b><br>
-        Upload Odoo Sales Forecasts and Pivot Return Reports. ORION will:
-        <ul>
-            <li>Detect Parent SKUs automatically.</li>
-            <li>Filter returns to the selected <b>{days}-day</b> window.</li>
-            <li>Calculate true return rates.</li>
-        </ul>
+    st.markdown("### Data Ingestion")
+    st.markdown(f"""
+    <div class='feature-card'>
+        <b>Processing Rules:</b><br>
+        1. <b>Odoo Forecasts:</b> System scans for 'Sales' or 'Qty' columns.<br>
+        2. <b>Return Reports:</b> Filtered to the last <b>{st.session_state.period_days} days</b> for accuracy.<br>
+        3. <b>Grouping:</b> Data is aggregated by Parent SKU (e.g. MOB1027).
     </div>
-    """.format(days=st.session_state.get('period_days', 90)), unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
     
-    files = st.file_uploader("Drop Files Here", accept_multiple_files=True)
-    if files:
-        if st.button("Process Files", type="primary"):
-            with st.spinner("Analyzing data structures..."):
-                df, warns = DataHandler.load_and_merge(files, st.session_state.period_days)
-                st.session_state.master_data = df
-                
-                if warns:
-                    for w in warns: st.warning(w)
-                
-                st.success(f"Successfully processed {len(df)} Parent SKU families.")
-
+    files = st.file_uploader("Upload Odoo & Return Files", accept_multiple_files=True)
+    if files and st.button("Run Analysis"):
+        df, warns = DataHandler.load_and_merge(files, st.session_state.period_days)
+        st.session_state.master_data = df
+        for w in warns: st.warning(w)
+        st.success(f"Processed {len(df)} SKU Families.")
+        
     if 'master_data' in st.session_state:
-        st.markdown("#### Analysis Preview")
-        st.dataframe(st.session_state.master_data.sort_values('Return_Rate', ascending=False).head(10), use_container_width=True)
-
-def render_dashboard():
-    render_header("Executive Dashboard")
-    if 'master_data' not in st.session_state:
-        st.info("No data loaded. Please go to Data Ingestion.")
-        return
-        
-    df = st.session_state.master_data
-    
-    # KPIs
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Active SKUs", len(df))
-    c2.metric("Total Returns", int(df['Returns'].sum()))
-    avg_rate = df['Return_Rate'].mean()
-    c3.metric("Avg Return Rate", f"{avg_rate:.2f}%")
-    c4.metric("High Risk Items", len(df[df['Return_Rate'] > 5.0]))
-    
-    st.markdown("---")
-    
-    c1, c2 = st.columns([2,1])
-    with c1:
-        st.markdown("#### Top Offenders (Return Rate > 3%)")
-        high_risk = df[df['Return_Rate'] > 3.0].sort_values('Return_Rate', ascending=False).head(10)
-        fig = px.bar(high_risk, x='Parent_SKU', y='Return_Rate', color='Return_Rate', title="Return Rate by Family")
-        st.plotly_chart(fig, use_container_width=True)
-        
-    with c2:
-        st.markdown("#### Watchlist")
-        st.dataframe(high_risk[['Parent_SKU', 'Return_Rate', 'Returns']], use_container_width=True)
-
-def render_vision():
-    render_header("Vision Diagnostics")
-    c1, c2 = st.columns([1,1])
-    
-    with c1:
-        st.markdown("#### Artifact Analysis")
-        img = st.file_uploader("Upload Image", type=['jpg','png'])
-        if img:
-            st.image(img, caption="Uploaded Artifact", use_column_width=True)
-            if st.button("Run Vision Analysis", type="primary"):
-                with st.spinner("Scanning..."):
-                    res = st.session_state.ai.analyze_image(Image.open(img), "Analyze this defect. Describe the failure mode, potential root cause, and severity.")
-                    st.session_state.vision_result = res
-    
-    with c2:
-        if 'vision_result' in st.session_state:
-            st.markdown("#### AI Findings")
-            st.markdown(f"<div class='feature-card'>{st.session_state.vision_result}</div>", unsafe_allow_html=True)
-            
-            st.markdown("### Actions")
-            if st.button("🚨 Escalate to CAPA"):
-                # Pre-fill CAPA state
-                st.session_state.capa_prefill = {
-                    'issue': st.session_state.vision_result,
-                    'source': 'Vision Diagnostic'
-                }
-                st.success("Findings sent to CAPA Manager. Navigate there to complete.")
+        st.dataframe(st.session_state.master_data.sort_values('Return_Rate', ascending=False), use_container_width=True)
 
 def render_capa():
-    render_header("CAPA Manager")
+    st.markdown("### CAPA Manager")
     
-    # Init CAPA State
     if 'capa_data' not in st.session_state:
-        st.session_state.capa_data = {}
-    
-    # Check for prefills from other modules
-    if 'capa_prefill' in st.session_state:
-        st.session_state.capa_data['issue_description'] = st.session_state.capa_prefill.get('issue', '')
-        st.session_state.capa_data['source'] = st.session_state.capa_prefill.get('source', 'Manual')
-        del st.session_state.capa_prefill # Clear after use
+        st.session_state.capa_data = {
+            'id': f"CAPA-{datetime.now().strftime('%y%m%d')}",
+            'risks': pd.DataFrame(columns=['Failure Mode', 'Effect', 'Sev', 'Occ', 'Det', 'RPN'])
+        }
         
     data = st.session_state.capa_data
+    
+    # Pre-fill hook
+    if 'capa_prefill' in st.session_state:
+        data['desc'] = st.session_state.capa_prefill
+        del st.session_state.capa_prefill
 
-    # --- AI AUTO-FILL BUTTON ---
-    c_ai, _ = st.columns([1, 2])
-    with c_ai:
-        if st.button("✨ Auto-Draft with AI", help="Generates a draft for all fields based on the Issue Description"):
-            if not data.get('issue_description'):
-                st.error("Please enter an Issue Description first.")
-            else:
-                with st.spinner(f"Drafting via {st.session_state.ai.provider}..."):
-                    draft = st.session_state.ai.generate_capa_draft({
-                        'product': data.get('product_sku', 'Unknown'),
-                        'issue': data.get('issue_description')
-                    })
-                    if draft:
-                        # Update state with draft
-                        data.update(draft)
-                        st.success("Draft Generated!")
-                        st.rerun()
-
-    # --- WORKFLOW TABS ---
-    tab1, tab2, tab3, tab4 = st.tabs(["1. Initiation", "2. Investigation & Risk", "3. Action Plan", "4. Verification"])
+    tab1, tab2, tab3, tab4 = st.tabs(["1. Intake", "2. Investigation (Fishbone)", "3. Risk (FMEA)", "4. Action"])
 
     with tab1:
-        st.markdown("#### Event Identification")
         c1, c2 = st.columns(2)
-        data['capa_id'] = c1.text_input("CAPA ID", value=data.get('capa_id', f"CAPA-{datetime.now().strftime('%y%m%d')}-001"))
-        data['product_sku'] = c2.text_input("Product SKU", value=data.get('product_sku', ''))
+        data['id'] = c1.text_input("CAPA ID", data['id'])
+        data['sku'] = c2.text_input("Product SKU")
+        data['desc'] = st.text_area("Issue Description", value=data.get('desc', ''), height=100)
         
-        data['source'] = st.selectbox("Source", ["Customer Complaint", "Internal Audit", "Vision Diagnostic", "Supplier"], index=0)
-        data['issue_description'] = st.text_area("Issue Description", value=data.get('issue_description', ''), height=150)
+        if st.button("✨ Auto-Draft with AI"):
+            with st.spinner("Drafting investigation plan..."):
+                prompt = f"Draft a CAPA investigation for {data['sku']}. Issue: {data['desc']}. JSON format."
+                res = st.session_state.ai.generate(prompt, json_mode=True)
+                if res: st.info("Draft generated (simulated populate)")
 
     with tab2:
-        st.markdown("#### Risk Assessment (FMEA)")
-        c1, c2, c3 = st.columns(3)
-        sev = c1.slider("Severity (S)", 1, 5, value=3, help="1=Minor, 5=Critical")
-        occ = c2.slider("Occurrence (O)", 1, 5, value=3, help="1=Rare, 5=Frequent")
-        rpn = sev * occ
+        st.markdown("#### Root Cause Analysis (Fishbone)")
         
-        color = "red" if rpn >= 15 else "orange" if rpn >= 8 else "green"
-        c3.markdown(f"### RPN: <span style='color:{color}'>{rpn}</span>", unsafe_allow_html=True)
+        c_fish1, c_fish2 = st.columns([1, 3])
+        with c_fish1:
+            cause_cats = ["Man", "Machine", "Material", "Method", "Measurement", "Environment"]
+            selected_cat = st.selectbox("Add Cause Category", cause_cats)
+            new_cause = st.text_input("Cause Detail")
+            if st.button("Add Branch"):
+                if 'fishbone' not in data: data['fishbone'] = []
+                data['fishbone'].append((selected_cat, new_cause))
         
-        st.markdown("#### Root Cause Analysis")
-        data['root_cause_analysis'] = st.text_area("Root Cause (5 Whys / Fishbone)", value=data.get('root_cause_analysis', ''), height=150)
-        data['containment_action'] = st.text_area("Immediate Containment", value=data.get('containment_action', ''), height=100)
+        with c_fish2:
+            # Visual Fishbone using Graphviz
+            if data.get('fishbone'):
+                graph = graphviz.Digraph()
+                graph.attr(rankdir='LR')
+                graph.node('Problem', data['desc'][:20]+"...")
+                
+                for cat, cause in data['fishbone']:
+                    graph.node(cat, cat, shape='box')
+                    graph.edge(cat, 'Problem')
+                    graph.node(cause, cause, shape='plain')
+                    graph.edge(cause, cat)
+                    
+                st.graphviz_chart(graph)
+            else:
+                st.info("Add causes to generate Fishbone Diagram.")
 
     with tab3:
-        st.markdown("#### Correction & Prevention")
-        data['corrective_action'] = st.text_area("Corrective Action (Long Term)", value=data.get('corrective_action', ''), height=150)
-        data['preventive_action'] = st.text_area("Preventive Action (Systemic)", value=data.get('preventive_action', ''), height=150)
+        st.markdown("#### Failure Mode & Effects Analysis (FMEA)")
         
-        c1, c2 = st.columns(2)
-        c1.date_input("Implementation Due Date")
-        c2.text_input("Owner")
+        # Initialize FMEA dataframe if empty
+        if data['risks'].empty:
+            data['risks'] = pd.DataFrame([
+                {"Failure Mode": "Example Mode", "Effect": "Customer Returns", "Sev": 3, "Occ": 2, "Det": 4, "RPN": 24}
+            ])
+
+        # Interactive Editor
+        edited_df = st.data_editor(
+            data['risks'],
+            num_rows="dynamic",
+            column_config={
+                "Sev": st.column_config.NumberColumn("Sev (1-10)", min_value=1, max_value=10),
+                "Occ": st.column_config.NumberColumn("Occ (1-10)", min_value=1, max_value=10),
+                "Det": st.column_config.NumberColumn("Det (1-10)", min_value=1, max_value=10),
+                "RPN": st.column_config.NumberColumn("RPN", disabled=True),
+            },
+            use_container_width=True
+        )
+        
+        # Auto-Calculate RPN
+        edited_df['RPN'] = edited_df['Sev'] * edited_df['Occ'] * edited_df['Det']
+        data['risks'] = edited_df
+        
+        # High Risk Highlight
+        high_risk = edited_df[edited_df['RPN'] > 40]
+        if not high_risk.empty:
+            st.error(f"⚠️ {len(high_risk)} High Risk Items detected (RPN > 40)")
 
     with tab4:
-        st.markdown("#### Effectiveness Check")
-        data['effectiveness_plan'] = st.text_area("Verification Plan", value=data.get('effectiveness_plan', ''), height=100)
+        st.text_area("Corrective Action Plan")
+        st.text_area("Verification of Effectiveness")
+        st.button("Save Record", type="primary")
+
+def render_vision():
+    st.markdown("### Vision Diagnostics")
+    img_file = st.file_uploader("Upload Defect Image", type=['png', 'jpg'])
+    
+    if img_file:
+        img = Image.open(img_file)
+        st.image(img, caption="Uploaded Artifact", width=400)
         
-        if st.button("💾 Save CAPA Record", type="primary"):
-            st.success(f"CAPA {data['capa_id']} Saved Successfully.")
-            # In a real app, save to DB here
+        if st.button("Run AI Analysis", type="primary"):
+            with st.spinner("Analyzing..."):
+                res = st.session_state.ai.analyze_image(img, "Analyze this defect. Identify product, defect type, and likely root cause.")
+                st.session_state.vision_res = res
+    
+    if 'vision_res' in st.session_state:
+        st.markdown(f"<div class='feature-card'>{st.session_state.vision_res}</div>", unsafe_allow_html=True)
+        if st.button("Escalate to CAPA"):
+            st.session_state.capa_prefill = st.session_state.vision_res
+            st.success("Sent to CAPA Intake")
 
-def render_strategy():
-    render_header("Strategy & Compliance")
-    st.info("ISO 13485 Document Generator")
-    # Placeholder for document gen logic
-    doc_type = st.selectbox("Document Type", ["Quality Manual", "SOP", "Work Instruction"])
-    if st.button("Generate Template"):
-        st.markdown(st.session_state.ai.generate(f"Write a {doc_type} template for ISO 13485"))
+def render_dashboard():
+    st.markdown("### Dashboard")
+    if 'master_data' in st.session_state:
+        df = st.session_state.master_data
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Active SKUs", len(df))
+        c2.metric("Avg Return Rate", f"{df['Return_Rate'].mean():.1f}%")
+        c3.metric("Total Returns", int(df['Returns'].sum()))
+        
+        fig = px.bar(df.head(10), x='Parent_SKU', y='Return_Rate', color='Return_Rate', title="Top Return Rates")
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("Please load data in 'Data Ingestion' tab.")
 
-# --- MAIN APP ---
+# --- MAIN ---
 def main():
     nav = render_sidebar()
     if nav == "Dashboard": render_dashboard()
     elif nav == "Data Ingestion": render_ingestion()
-    elif nav == "Vision": render_vision()
     elif nav == "CAPA Manager": render_capa()
-    elif nav == "Strategy": render_strategy()
+    elif nav == "Vision": render_vision()
+    elif nav == "Strategy": st.info("Strategy Module Placeholder")
 
 if __name__ == "__main__":
     main()
