@@ -12,168 +12,102 @@ from datetime import datetime
 
 # --- 1. SYSTEM CONFIGURATION ---
 st.set_page_config(
-    page_title="ORION Intelligence | VIVE Health",
+    page_title="ORION Enterprise | VIVE Health",
     page_icon="🧬",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# --- 2. ENTERPRISE THEME (Minimalist & Clean) ---
+# --- 2. ENTERPRISE THEME (Glassmorphism & Professional) ---
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
-    /* Global Reset */
-    .stApp {
-        background-color: #F8FAFC; /* Slate 50 */
-        color: #334155; /* Slate 700 */
-        font-family: 'Inter', sans-serif;
+    :root {
+        --primary: #2563EB;
+        --bg-light: #F8FAFC;
+        --card-bg: #FFFFFF;
+        --border: #E2E8F0;
     }
 
-    /* Typography */
-    h1, h2, h3 {
-        color: #0F172A !important; /* Slate 900 */
-        font-weight: 700 !important;
-        letter-spacing: -0.5px;
-    }
-    h1 { font-size: 2.2rem !important; margin-bottom: 0.5rem !important; }
-    p, div, label, span { font-size: 0.95rem; }
+    .stApp { background-color: var(--bg-light); font-family: 'Inter', sans-serif; color: #1E293B; }
 
-    /* Sidebar */
-    section[data-testid="stSidebar"] {
-        background-color: #FFFFFF;
-        border-right: 1px solid #E2E8F0;
-    }
-    
-    /* Custom Cards */
-    .metric-card {
-        background-color: #FFFFFF;
-        border: 1px solid #E2E8F0;
-        border-radius: 8px;
-        padding: 20px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-    }
-    
-    /* Buttons */
-    .stButton>button {
-        background-color: #2563EB !important; /* Royal Blue */
-        color: #FFFFFF !important;
-        border: none;
-        border-radius: 6px;
-        padding: 0.5rem 1rem;
-        font-weight: 600;
-        transition: all 0.2s;
-    }
-    .stButton>button:hover {
-        background-color: #1D4ED8 !important;
-        box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2);
-    }
-    
-    /* Inputs */
-    .stTextInput input, .stSelectbox div[data-baseweb="select"] div, .stTextArea textarea {
-        background-color: #FFFFFF !important;
-        border: 1px solid #CBD5E1;
-        color: #0F172A !important;
-        border-radius: 6px;
-    }
-    
-    /* Status Indicators */
-    .status-pill {
-        padding: 4px 12px;
-        border-radius: 9999px;
-        font-size: 0.75rem;
-        font-weight: 600;
-        display: inline-block;
-    }
-    .status-online { background-color: #DCFCE7; color: #166534; }
-    .status-offline { background-color: #FEE2E2; color: #991B1B; }
+    /* HEADER */
+    .brand-header { padding-bottom: 1rem; border-bottom: 1px solid var(--border); margin-bottom: 2rem; }
+    .brand-title { font-size: 2.5rem; font-weight: 800; color: #0F172A; letter-spacing: -1px; margin: 0; line-height: 1.1; }
+    .brand-subtitle { font-size: 0.875rem; color: #64748B; text-transform: uppercase; letter-spacing: 1.5px; font-weight: 600; margin-top: 0.5rem; }
+    .brand-accent { color: var(--primary); }
 
-    /* Tabs */
-    .stTabs [data-baseweb="tab-list"] { gap: 20px; }
-    .stTabs [data-baseweb="tab"] {
-        height: 50px;
-        white-space: pre-wrap;
-        background-color: transparent;
-        border-radius: 4px 4px 0px 0px;
-        gap: 1px;
-        padding-top: 10px;
-        padding-bottom: 10px;
-        color: #64748B;
-    }
-    .stTabs [aria-selected="true"] {
-        color: #2563EB;
-        border-bottom: 2px solid #2563EB;
-    }
+    /* CARDS */
+    .feature-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 24px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
+    div[data-testid="metric-container"] { background-color: white; border: 1px solid #E2E8F0; padding: 15px; border-radius: 10px; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); }
+
+    /* SIDEBAR */
+    section[data-testid="stSidebar"] { background-color: #FFFFFF; border-right: 1px solid #E2E8F0; }
+
+    /* INPUTS */
+    .stTextInput input, .stSelectbox div[data-baseweb="select"] div, .stTextArea textarea { background-color: #FFFFFF; border: 1px solid #CBD5E1; border-radius: 8px; color: #1E293B; }
+    .stButton>button { border-radius: 8px; font-weight: 600; padding: 0.5rem 1.5rem; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. ROBUST INTELLIGENCE ENGINE ---
+# --- 3. INTELLIGENCE ENGINE ---
 class IntelligenceEngine:
     def __init__(self):
         self.client = None
         self.provider = None
         self.model_name = None
         self.available = False
-        self.error_log = []
-        self._initialize_clients()
+        self.clients = {} 
+        self._initialize_all_clients()
 
-    def _get_secret(self, key_names):
-        """Robustly fetch secret from st.secrets or os.environ"""
-        for key in key_names:
-            # Check st.secrets (handles nested dictionary access if formatted that way)
-            if hasattr(st, "secrets") and key in st.secrets:
-                return st.secrets[key]
-            # Check Environment Variables
-            env_val = os.environ.get(key)
-            if env_val:
-                return env_val
+    def _get_key(self, names):
+        for name in names:
+            if hasattr(st, "secrets") and name in st.secrets: return st.secrets[name]
+            if os.environ.get(name): return os.environ.get(name)
         return None
 
-    def _initialize_clients(self):
-        """Priority: 1. Google Gemini, 2. OpenAI"""
-        
-        # 1. Try Google Gemini
-        google_key = self._get_secret(["GOOGLE_API_KEY", "GEMINI_API_KEY", "google_api_key"])
+    def _initialize_all_clients(self):
+        # OpenAI
+        openai_key = self._get_key(["OPENAI_API_KEY", "openai_api_key"])
+        if openai_key:
+            try:
+                import openai
+                self.clients['openai'] = openai.OpenAI(api_key=openai_key)
+            except: pass
+        # Google
+        google_key = self._get_key(["GOOGLE_API_KEY", "GEMINI_API_KEY", "google_api_key"])
         if google_key:
             try:
                 import google.generativeai as genai
                 genai.configure(api_key=google_key)
-                self.client = genai
-                self.model = genai.GenerativeModel('gemini-1.5-flash') # Fast, latest model
-                self.provider = "Google Gemini"
-                self.model_name = "gemini-1.5-flash"
-                self.available = True
-                return
-            except Exception as e:
-                self.error_log.append(f"Gemini Init Failed: {str(e)}")
+                self.clients['google'] = genai
+            except: pass
 
-        # 2. Try OpenAI
-        openai_key = self._get_secret(["OPENAI_API_KEY", "openai_api_key"])
-        if openai_key:
-            try:
-                import openai
-                self.client = openai.OpenAI(api_key=openai_key)
-                self.provider = "OpenAI"
-                self.model_name = "gpt-4o"
-                self.available = True
-                return
-            except Exception as e:
-                self.error_log.append(f"OpenAI Init Failed: {str(e)}")
-
+    def set_active_model(self, choice):
         self.available = False
+        if choice.startswith("Gemini") and 'google' in self.clients:
+            self.provider = "Google"
+            self.client = self.clients['google']
+            if "Flash" in choice: self.model_name = "gemini-1.5-flash"
+            elif "Pro" in choice: self.model_name = "gemini-1.5-pro"
+            else: self.model_name = "gemini-1.5-flash"
+            self.available = True
+        elif choice.startswith("GPT") and 'openai' in self.clients:
+            self.provider = "OpenAI"
+            self.client = self.clients['openai']
+            if "4o" in choice: self.model_name = "gpt-4o"
+            elif "Mini" in choice: self.model_name = "gpt-4o-mini"
+            else: self.model_name = "gpt-4o"
+            self.available = True
 
-    def generate(self, prompt, temperature=0.2):
-        if not self.available:
-            return "⚠️ AI Intelligence Offline. Check API Keys."
-        
+    def generate(self, prompt, temperature=0.3):
+        if not self.available: return "⚠️ AI Offline. Please check API Keys."
         try:
-            if self.provider == "Google Gemini":
-                response = self.model.generate_content(
-                    prompt,
-                    generation_config=dict(temperature=temperature)
-                )
+            if self.provider == "Google":
+                model = self.client.GenerativeModel(self.model_name)
+                response = model.generate_content(prompt, generation_config={'temperature': temperature})
                 return response.text
-            
             elif self.provider == "OpenAI":
                 response = self.client.chat.completions.create(
                     model=self.model_name,
@@ -181,357 +115,415 @@ class IntelligenceEngine:
                     temperature=temperature
                 )
                 return response.choices[0].message.content
-                
         except Exception as e:
-            return f"Generation Error ({self.provider}): {str(e)}"
+            return f"Error ({self.provider}): {str(e)}"
 
-    def analyze_vision(self, image, prompt):
+    def analyze_image(self, image, prompt):
         if not self.available: return "⚠️ AI Offline."
-        
         try:
-            if self.provider == "Google Gemini":
-                response = self.model.generate_content([prompt, image])
+            if self.provider == "Google":
+                model = self.client.GenerativeModel(self.model_name)
+                response = model.generate_content([prompt, image])
                 return response.text
             elif self.provider == "OpenAI":
-                # Simple text fallback for OpenAI if vision not set up specifically
-                return "Vision analysis is currently optimized for Gemini. Please check configuration."
+                return "Vision analysis is optimized for Gemini models in this version."
         except Exception as e:
             return f"Vision Error: {str(e)}"
 
-    def categorize_batch(self, batch_data):
-        """Batch processor for categories"""
-        if not self.available: return batch_data
-        
-        prompt = "Classify these medical device complaints into exactly one category: [Defect, Performance, Missing Parts, Design, Usability, Medical Event, Shipping, Other]. Return ONLY the category name per line matching the input order.\n\n"
-        for item in batch_data:
-            prompt += f"- {item['complaint']}\n"
-            
+    def categorize_batch(self, items):
+        if not self.available: return items
+        prompt = f"""
+        You are a Quality Assurance AI. Classify the following medical device feedback into ONE of these categories:
+        [Product Defect, Usability Issue, Missing Parts, Design Flaw, Shipping Damage, Medical Adverse Event, General Inquiry].
+        Return ONLY the category name for each item in a new line.
+        Items:
+        """
+        for item in items:
+            prompt += f"- {item['text']}\n"
         try:
-            response_text = self.generate(prompt, temperature=0.0)
-            categories = [line.strip().replace('- ', '') for line in response_text.split('\n') if line.strip()]
-            
-            # Map results back
-            for i, item in enumerate(batch_data):
-                if i < len(categories):
-                    item['category'] = categories[i]
-                else:
-                    item['category'] = "Uncategorized"
-            return batch_data
-        except Exception as e:
-            for item in batch_data: item['category'] = "Error"
-            return batch_data
+            res = self.generate(prompt, temperature=0.0)
+            lines = [l.strip().replace('- ', '') for l in res.split('\n') if l.strip()]
+            for i, item in enumerate(items):
+                if i < len(lines): item['category'] = lines[i]
+                else: item['category'] = "Uncategorized"
+            return items
+        except:
+            return items
 
-# Initialize Singleton in Session State
 if 'ai' not in st.session_state:
     st.session_state.ai = IntelligenceEngine()
 
-# --- 4. DATA LOGIC ---
-class DataEngine:
+# --- 4. ADVANCED DATA HANDLER (MULTI-FILE & DIRTY HEADER LOGIC) ---
+class DataHandler:
+    
     @staticmethod
-    def process_file(file_content, filename):
+    def find_header_row(df, keywords=['sku', 'asin', 'product', 'title', 'date']):
+        """Scans first 20 rows to find the true header row based on keywords."""
+        for i in range(min(20, len(df))):
+            row_values = df.iloc[i].astype(str).str.lower().tolist()
+            # Check if this row contains at least 2 of our target keywords
+            matches = sum(1 for k in keywords if any(k in val for val in row_values))
+            if matches >= 2:
+                return i
+        return 0 # Default to 0 if not found
+
+    @staticmethod
+    def process_odoo_file(file, period_label):
+        """Special logic for Odoo Inventory Forecasts"""
         try:
-            if filename.endswith('.csv'):
-                df = pd.read_csv(io.BytesIO(file_content), dtype=str)
-            else:
-                df = pd.read_excel(io.BytesIO(file_content), dtype=str)
+            # Read without header initially to sniff structure
+            raw_df = pd.read_excel(file, header=None)
             
-            # Simple column mapper logic
-            col_map = {}
-            cols = df.columns.tolist()
+            # Find header row (skipping "Odoo - Inventory Forecast...")
+            header_idx = DataHandler.find_header_row(raw_df, keywords=['product', 'sku', 'forecast', 'quantity'])
             
-            # Heuristic: Look for "Complaint", "Comment", "Review"
-            complaint_col = next((c for c in cols if any(x in c.lower() for x in ['complaint', 'comment', 'body', 'review'])), None)
+            # Reload with correct header
+            df = pd.read_excel(file, header=header_idx)
             
-            if complaint_col:
-                col_map['complaint'] = complaint_col
-                # Create category column if not exists
-                col_map['category'] = 'Auto_Category'
-                if 'Auto_Category' not in df.columns:
-                    df['Auto_Category'] = ''
-                return df, col_map
+            # Clean column names
+            df.columns = [str(c).strip() for c in df.columns]
             
-            # Fallback to indices if specific format known
-            if len(cols) >= 9: 
-                col_map['complaint'] = cols[8] # Historical column I
-                col_map['category'] = cols[10] if len(cols) > 10 else 'Auto_Category'
-                if col_map['category'] not in df.columns: df[col_map['category']] = ''
-                return df, col_map
-                
-            return None, None
+            # Handle the Sales Column (often Unnamed: 11 or similar)
+            # We look for columns that might be the sales data if they are unnamed
+            for col in df.columns:
+                if "Unnamed" in col:
+                    # Heuristic: Check if data in this column is numeric
+                    if pd.to_numeric(df[col], errors='coerce').notna().sum() > (len(df) * 0.5):
+                        # Rename using the user-selected period
+                        df.rename(columns={col: f"Sales_{period_label}"}, inplace=True)
+                        break
+            
+            df['Source_File'] = "Odoo_Forecast"
+            return df
         except Exception as e:
-            st.error(f"File Error: {e}")
-            return None, None
+            st.error(f"Odoo Parse Error: {e}")
+            return None
 
     @staticmethod
-    def convert_df(df):
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df.to_excel(writer, index=False)
-        return output.getvalue()
+    def process_return_report(file):
+        """Special logic for Pivot Return Reports"""
+        try:
+            raw_df = pd.read_excel(file, header=None)
+            header_idx = DataHandler.find_header_row(raw_df, keywords=['return', 'reason', 'sku', 'product'])
+            
+            df = pd.read_excel(file, header=header_idx)
+            df['Source_File'] = "Return_Report"
+            return df
+        except Exception as e:
+            st.error(f"Return Report Parse Error: {e}")
+            return None
 
-# --- 5. UI MODULES ---
-
-def render_header():
-    c1, c2 = st.columns([3, 1])
-    with c1:
-        st.markdown("<h1>ORION <span style='font-weight:400; font-size:1.5rem; color:#64748B;'>Intelligence Suite</span></h1>", unsafe_allow_html=True)
-        st.markdown("<p style='color:#64748B; margin-top:-10px;'>Medical Device Quality & Feedback Analytics</p>", unsafe_allow_html=True)
-    with c2:
-        if st.session_state.ai.available:
-            st.markdown(f"<div style='text-align:right'><span class='status-pill status-online'>● {st.session_state.ai.provider} Active</span></div>", unsafe_allow_html=True)
-        else:
-            st.markdown("<div style='text-align:right'><span class='status-pill status-offline'>● AI Offline</span></div>", unsafe_allow_html=True)
-
-def render_dashboard():
-    if 'categorized_data' not in st.session_state:
-        st.markdown("""
-        <div style='background-color:white; padding:40px; border-radius:10px; text-align:center; border:1px dashed #CBD5E1;'>
-            <h3 style='color:#334155'>Waiting for Data</h3>
-            <p>Navigate to the <b>Categorizer</b> tab to upload and process your feedback data.</p>
-        </div>
-        """, unsafe_allow_html=True)
-        return
-
-    df = st.session_state.categorized_data
-    cat_col = st.session_state.col_map.get('category')
-    
-    st.markdown("### Executive Summary")
-    m1, m2, m3, m4 = st.columns(4)
-    
-    total = len(df)
-    defects = len(df[df[cat_col].astype(str).str.contains('Defect', case=False, na=False)])
-    safety = len(df[df[cat_col].astype(str).str.contains('Medical', case=False, na=False)])
-    
-    m1.metric("Total Records", f"{total:,}")
-    m2.metric("Product Defects", f"{defects:,}", delta=f"{defects/total:.1%}" if total else "0%")
-    m3.metric("Safety Signals", f"{safety}", delta_color="inverse")
-    m4.metric("Processing Time", "1.2s")
-
-    c1, c2 = st.columns([2, 1])
-    with c1:
-        st.markdown("#### Category Distribution")
-        counts = df[cat_col].value_counts().reset_index()
-        counts.columns = ['Category', 'Count']
-        fig = px.bar(counts, x='Category', y='Count', color='Count', color_continuous_scale='Blues')
-        fig.update_layout(plot_bgcolor='white', height=350)
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with c2:
-        st.markdown("#### Risk Analysis")
-        fig2 = px.pie(counts, values='Count', names='Category', hole=0.6, color_discrete_sequence=px.colors.sequential.Blues_r)
-        fig2.update_layout(height=350, showlegend=False)
-        st.plotly_chart(fig2, use_container_width=True)
-
-def render_categorizer():
-    st.markdown("### Smart Categorizer")
-    st.markdown("Upload raw feedback exports (CSV/Excel). The AI will classify text into standard quality buckets.")
-    
-    uploaded_file = st.file_uploader("Drop file here", type=['csv', 'xlsx'])
-    
-    if uploaded_file:
-        if 'curr_file' not in st.session_state or st.session_state.curr_file != uploaded_file.name:
-            df, col_map = DataEngine.process_file(uploaded_file.getvalue(), uploaded_file.name)
+    @staticmethod
+    def load_data(files, odoo_period="30 Days"):
+        combined_df = pd.DataFrame()
+        
+        for file in files:
+            fname = file.name.lower()
+            
+            # Route based on filename signature
+            if "odoo" in fname or "forecast" in fname:
+                df = DataHandler.process_odoo_file(file, odoo_period)
+                
+            elif "pivot" in fname or "return.report" in fname:
+                df = DataHandler.process_return_report(file)
+                
+            else:
+                # Generic fallback
+                if fname.endswith('.csv'):
+                    df = pd.read_csv(file)
+                else:
+                    # Try to find header even for generic files
+                    raw_df = pd.read_excel(file, header=None)
+                    h_idx = DataHandler.find_header_row(raw_df)
+                    df = pd.read_excel(file, header=h_idx)
+            
             if df is not None:
-                st.session_state.raw_df = df
-                st.session_state.col_map = col_map
-                st.session_state.curr_file = uploaded_file.name
-                st.session_state.processed = False
-    
-    if 'raw_df' in st.session_state:
-        df = st.session_state.raw_df
-        col_map = st.session_state.col_map
+                # Add a tracking column for origin
+                df['Origin_File'] = file.name
+                combined_df = pd.concat([combined_df, df], ignore_index=True)
+                
+        return combined_df
+
+    @staticmethod
+    def detect_columns(df):
+        cols = [str(c).lower() for c in df.columns]
+        mapping = {}
+        
+        # Smart Detection
+        mapping['text'] = next((c for c in df.columns if any(x in str(c).lower() for x in ['body', 'comment', 'review', 'reason', 'complaint'])), None)
+        mapping['date'] = next((c for c in df.columns if 'date' in str(c).lower()), None)
+        
+        return mapping
+
+# --- 5. UI COMPONENTS ---
+
+def render_sidebar():
+    with st.sidebar:
+        st.markdown("### ⚙️ System Controls")
+        
+        # AI Model Selector
+        st.markdown("**Active Intelligence Model**")
+        model_options = []
+        if 'google' in st.session_state.ai.clients:
+            model_options.extend(["Gemini 1.5 Pro (Google)", "Gemini 1.5 Flash (Google)"])
+        if 'openai' in st.session_state.ai.clients:
+            model_options.extend(["GPT-4o (OpenAI)", "GPT-4o Mini (OpenAI)"])
+            
+        if not model_options:
+            st.error("No API Keys Detected")
+            model_choice = "Offline"
+        else:
+            default_ix = 0
+            for i, m in enumerate(model_options):
+                if "Flash" in m: default_ix = i
+            model_choice = st.selectbox("Select Provider", model_options, index=default_ix, label_visibility="collapsed")
+            st.session_state.ai.set_active_model(model_choice)
+            
+            st.markdown(f"""
+            <div style='background-color:#DCFCE7; padding:8px; border-radius:6px; border:1px solid #86EFAC; display:flex; align-items:center; gap:8px;'>
+                <div style='width:8px; height:8px; background-color:#16A34A; border-radius:50%;'></div>
+                <span style='font-size:0.8rem; color:#14532D; font-weight:600;'>{model_choice.split('(')[0]} Active</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.markdown("---")
+        
+        # Odoo Time Config
+        st.markdown("**📅 Odoo Reporting Period**")
+        st.caption("Select the time period for uploaded Odoo Sales columns (e.g., Unnamed: 11)")
+        odoo_period = st.selectbox("Sales Period", ["30 Days", "45 Days", "60 Days", "90 Days", "180 Days", "365 Days"], index=3)
+        st.session_state.odoo_period = odoo_period
+
+        st.markdown("---")
+        
+        st.markdown("**Module Selection**")
+        nav = st.radio("Navigate", [
+            "Executive Dashboard", 
+            "Smart Categorizer", 
+            "Vision Diagnostics", 
+            "CAPA Suite", 
+            "Strategy & Compliance"
+        ], label_visibility="collapsed")
         
         st.markdown("---")
-        c1, c2 = st.columns([3, 1])
-        with c1:
-            st.markdown(f"**Loaded:** {st.session_state.curr_file}")
-            st.dataframe(df.head(3), use_container_width=True)
-        
-        with c2:
-            st.markdown(f"**Rows:** {len(df)}")
-            if st.button("✨ Run AI Classification", type="primary", use_container_width=True):
-                if not st.session_state.ai.available:
-                    st.error("AI Not Configured")
-                    return
-                
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                
-                # Processing Logic
-                batch_size = 20
-                valid_rows = df[df[col_map['complaint']].notna()].to_dict('records')
-                total = len(valid_rows)
-                
-                for i in range(0, total, batch_size):
-                    batch = valid_rows[i:i+batch_size]
-                    clean_batch = [{'index': r.name if hasattr(r, 'name') else x, 'complaint': r[col_map['complaint']]} for x, r in enumerate(batch)]
-                    
-                    # AI Call
-                    classified = st.session_state.ai.categorize_batch(clean_batch)
-                    
-                    # Update DF
-                    cat_idx = df.columns.get_loc(col_map['category'])
-                    for item, original_row in zip(classified, batch):
-                         # Note: This simple mapping assumes order is preserved. 
-                         # For production large scale, index mapping is safer.
-                         pass 
-                    
-                    # Simplified: just update the session state DF directly for demo
-                    # (In real implementation, would map back via index)
-                    
-                    progress_bar.progress(min((i + batch_size) / total, 1.0))
-                    status_text.text(f"Classifying row {i} to {min(i+batch_size, total)}...")
-                
-                # Mocking the result for the demo stability since batch mapping logic 
-                # requires precise index handling which varies by file type
-                # This simulates the AI result:
-                df[col_map['category']] = df[col_map['complaint']].apply(lambda x: "Defect" if "broke" in str(x).lower() else "Performance")
-                
-                st.session_state.categorized_data = df
-                st.session_state.processed = True
-                st.success("Classification Complete")
-                st.rerun()
+        st.caption(f"**O.R.I.O.N. Enterprise**\nOperational Review & Intelligence\nOptimization Network")
 
-    if st.session_state.get('processed'):
-        st.download_button(
-            "📥 Download Results",
-            data=DataEngine.convert_df(st.session_state.categorized_data),
-            file_name="Orion_Analyzed_Data.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+    return nav
+
+def render_header(module_name):
+    st.markdown(f"""
+    <div class="brand-header">
+        <h1 class="brand-title">O.R.I.O.N. <span class="brand-accent">Enterprise</span></h1>
+        <div class="brand-subtitle">Operational Review & Intelligence Optimization Network</div>
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown(f"### {module_name}")
+
+def render_dashboard():
+    render_header("Executive Dashboard")
+    
+    if 'analyzed_df' not in st.session_state:
+        st.info("👋 Welcome to O.R.I.O.N. Please load data in the **Smart Categorizer** to populate this dashboard.")
+        return
+
+    df = st.session_state.analyzed_df
+    
+    # Top Level Metrics
+    c1, c2, c3, c4 = st.columns(4)
+    total = len(df)
+    defects = len(df[df['Category'] == 'Product Defect']) if 'Category' in df.columns else 0
+    
+    c1.metric("Total Records", f"{total:,}")
+    if total > 0:
+        c2.metric("Defect Rate", f"{(defects/total)*100:.1f}%", delta_color="inverse")
+    c3.metric("Model Provider", st.session_state.ai.provider)
+    c4.metric("Odoo Period", st.session_state.get('odoo_period', 'N/A'))
+    
+    st.markdown("---")
+    
+    if 'Category' in df.columns:
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            st.markdown("#### Quality Distribution")
+            counts = df['Category'].value_counts().reset_index()
+            counts.columns = ['Category', 'Count']
+            fig = px.bar(counts, x='Category', y='Count', color='Category', color_discrete_sequence=px.colors.qualitative.Safe)
+            fig.update_layout(paper_bgcolor="white", plot_bgcolor="white", height=350)
+            st.plotly_chart(fig, use_container_width=True)
+            
+        with col2:
+            st.markdown("#### Priority Segments")
+            fig2 = px.pie(counts, values='Count', names='Category', hole=0.7)
+            fig2.update_layout(height=350, showlegend=False)
+            st.plotly_chart(fig2, use_container_width=True)
+
+def render_categorizer():
+    render_header("Smart Categorizer")
+    
+    st.markdown(f"""
+    <div class="feature-card">
+        <b>Multi-File Ingestion Engine</b><br>
+        Supports Odoo Forecasts, Pivot Return Reports, and standard CSVs simultaneously.<br>
+        <span style="font-size:0.8rem; color:#64748B;">Current Odoo Sales Period Config: <b>{st.session_state.get('odoo_period', '90 Days')}</b></span>
+    </div><br>
+    """, unsafe_allow_html=True)
+    
+    # Multi-file uploader
+    files = st.file_uploader("Upload Data Sources", type=['csv', 'xlsx'], accept_multiple_files=True)
+    
+    if files:
+        # Process all files
+        df = DataHandler.load_data(files, st.session_state.get('odoo_period', "90 Days"))
+        
+        if df is not None and not df.empty:
+            st.success(f"Successfully merged {len(files)} files. Total records: {len(df)}.")
+            
+            with st.expander("Preview Raw Data"):
+                st.dataframe(df.head(), use_container_width=True)
+            
+            cols = DataHandler.detect_columns(df)
+            
+            if not cols['text']:
+                st.warning("Auto-detection couldn't find a clear 'Review' or 'Reason' column. Please select it manually below.")
+                text_col = st.selectbox("Select Column to Categorize", df.columns)
+            else:
+                text_col = cols['text']
+                st.info(f"Ready to classify based on column: **{text_col}**")
+            
+            if st.button("🚀 Start AI Classification", type="primary"):
+                progress_bar = st.progress(0)
+                
+                # Filter for valid text rows
+                valid_df = df[df[text_col].notna()].copy()
+                
+                # Limit for demo speed if huge
+                process_limit = 100
+                if len(valid_df) > process_limit:
+                    st.caption(f"Demo mode: Processing first {process_limit} records for speed...")
+                    valid_df = valid_df.head(process_limit)
+                
+                # Convert to list of dicts
+                items = [{'text': str(x)} for x in valid_df[text_col].tolist()]
+                
+                # AI Batch Process
+                results = st.session_state.ai.categorize_batch(items)
+                
+                # Assign back to dataframe (careful with indices if filtered)
+                valid_df['Category'] = [r.get('category', 'Uncategorized') for r in results]
+                
+                # Update session state
+                st.session_state.analyzed_df = valid_df
+                progress_bar.progress(100)
+                st.rerun()
+                
+    if 'analyzed_df' in st.session_state:
+        st.markdown("### Classification Results")
+        # Show key columns
+        display_cols = [c for c in st.session_state.analyzed_df.columns if c in ['Category', 'Origin_File'] or "Sales" in c]
+        st.dataframe(st.session_state.analyzed_df, use_container_width=True)
+        
+        csv = st.session_state.analyzed_df.to_csv(index=False).encode('utf-8')
+        st.download_button("📥 Export Categorized Data", csv, "orion_export.csv", "text/csv")
 
 def render_vision():
-    st.markdown("### Vision Intelligence")
-    st.info("Upload photos of returns or screenshots of reviews for automated defect extraction.")
+    render_header("Vision Diagnostics")
     
-    c1, c2 = st.columns(2)
+    c1, c2 = st.columns([1, 1])
+    
     with c1:
-        img_file = st.file_uploader("Upload Image", type=['png', 'jpg', 'jpeg'])
+        st.markdown("#### Image Input")
+        img_file = st.file_uploader("Upload Defect Photo", type=['png', 'jpg', 'jpeg'])
+        
         if img_file:
             image = Image.open(img_file)
-            st.image(image, caption="Source Image", use_column_width=True)
+            st.image(image, use_column_width=True, caption="Source Artifact")
             
-            if st.button("Analyze Image", type="primary"):
-                with st.spinner("Analyzing visual data..."):
-                    res = st.session_state.ai.analyze_vision(image, "Identify the product, any visible defects, and the likely cause of failure. Be technical.")
+            if st.button("Analyze Artifact", type="primary", use_container_width=True):
+                if "OpenAI" in st.session_state.ai.provider:
+                    st.warning("Note: Ensure you are using a vision-capable model (GPT-4o).")
+                
+                with st.spinner("Processing visual data points..."):
+                    prompt = "Analyze this medical device image. Identify: 1. The product type. 2. Visible defects or damage. 3. Potential root cause. 4. Risk severity (Low/Med/High)."
+                    res = st.session_state.ai.analyze_image(image, prompt)
                     st.session_state.vision_result = res
     
     with c2:
+        st.markdown("#### AI Findings")
         if 'vision_result' in st.session_state:
-            st.markdown("#### Analysis Report")
-            st.markdown(f"""
-            <div class='metric-card'>
-                {st.session_state.vision_result}
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown(f"""<div class="feature-card">{st.session_state.vision_result}</div>""", unsafe_allow_html=True)
             
-            if st.button("Create CAPA from Findings"):
-                st.session_state.capa_desc = st.session_state.vision_result
-                st.session_state.nav_selection = "CAPA Manager"
-                st.rerun()
+            st.markdown("### Next Actions")
+            if st.button("⚡ Escalate to CAPA"):
+                st.session_state.capa_intake_desc = st.session_state.vision_result
+                st.info("Findings copied to CAPA Intake.")
 
 def render_capa():
-    st.markdown("### CAPA Manager")
+    render_header("CAPA Suite")
     
     if 'capa_id' not in st.session_state:
-        st.session_state.capa_id = f"CAPA-{datetime.now().strftime('%y%m%d')}-001"
+        st.session_state.capa_id = f"CAPA-{datetime.now().strftime('%Y%m%d')}-001"
     
-    desc_val = st.session_state.get('capa_desc', "")
-    
-    with st.form("capa_form"):
-        c1, c2 = st.columns([2, 1])
+    intake_desc = st.session_state.get('capa_intake_desc', "")
+
+    tab1, tab2, tab3, tab4 = st.tabs(["1. Intake", "2. Risk (RPN)", "3. Investigation", "4. Action"])
+
+    with tab1:
+        c1, c2 = st.columns(2)
         with c1:
-            st.markdown("#### Issue Definition")
             st.text_input("CAPA ID", st.session_state.capa_id, disabled=True)
-            st.text_area("Problem Description", value=desc_val, height=120)
-            
-            st.markdown("#### Root Cause Analysis")
-            st.text_area("Why did this happen? (5 Whys)", height=100)
-        
+            st.text_area("Problem Description", value=intake_desc, height=150)
         with c2:
-            st.markdown("#### Meta Data")
-            st.selectbox("Priority", ["High", "Medium", "Low"])
-            st.selectbox("Source", ["Customer Complaint", "Vision AI", "Internal Audit"])
-            st.selectbox("Department", ["Quality", "Engineering", "Manufacturing"])
-            st.date_input("Target Close Date")
-        
-        st.markdown("#### Action Plan")
-        c3, c4 = st.columns(2)
-        with c3:
-            st.text_input("Corrective Action (Immediate)")
-        with c4:
-            st.text_input("Preventive Action (Long term)")
-            
-        submitted = st.form_submit_button("Submit CAPA Record", type="primary")
-        if submitted:
-            st.success(f"CAPA {st.session_state.capa_id} logged successfully.")
+            st.selectbox("Source", ["Customer Complaint", "Internal Audit", "Vision AI"])
+            st.selectbox("Product Line", ["Mobility", "Respiratory", "Patient Room"])
+
+    with tab2:
+        st.markdown("#### Risk Quantification")
+        c1, c2, c3 = st.columns(3)
+        sev = c1.select_slider("Severity", [1, 2, 3, 4, 5], value=3)
+        occ = c2.select_slider("Occurrence", [1, 2, 3, 4, 5], value=2)
+        det = c3.select_slider("Detection", [1, 2, 3, 4, 5], value=3)
+        rpn = sev * occ * det
+        st.metric("RPN Score", rpn)
+
+    with tab3:
+        st.text_area("Root Cause Analysis (Fishbone / 5 Whys)", height=150)
+
+    with tab4:
+        st.text_area("Corrective Action Plan")
+        if st.button("Save CAPA"):
+            st.success("Record Saved.")
 
 def render_strategy():
-    st.markdown("### Strategy Planner")
-    st.markdown("Generate Quality Project Plans (QPP) based on ISO 13485 standards.")
+    render_header("Strategy & Compliance")
     
-    c1, c2 = st.columns(2)
+    st.markdown("""<div class="feature-card"><b>AI Quality Planner</b><br>Generate ISO 13485 compliant project plans.</div><br>""", unsafe_allow_html=True)
+    
+    c1, c2 = st.columns([1, 2])
     with c1:
-        p_name = st.text_input("Product Name", "Vive Mobility Walker")
-        p_goal = st.text_area("Project Goal", "Reduce return rate by 15% due to wheel defects.")
+        doc_type = st.selectbox("Document Type", ["Quality Project Plan", "Validation Protocol", "Risk Management Plan"])
+        project = st.text_input("Project Name")
+        focus = st.text_area("Key Focus")
+        
+        if st.button("Generate Document", type="primary"):
+            with st.spinner(f"Generating via {st.session_state.ai.model_name}..."):
+                prompt = f"Draft a medical device {doc_type} for project '{project}'. Focus: {focus}. Include ISO 13485 sections."
+                res = st.session_state.ai.generate(prompt)
+                st.session_state.strategy_doc = res
+    
     with c2:
-        p_timeline = st.text_input("Timeline", "Q4 2025")
-        p_type = st.selectbox("Plan Type", ["Comprehensive (Critical Device)", "Streamlined (Low Risk)"])
-    
-    if st.button("Generate Plan"):
-        if not st.session_state.ai.available:
-            st.error("AI Offline")
-        else:
-            with st.spinner("Generating Quality Plan..."):
-                prompt = f"Create a {p_type} Quality Plan for {p_name}. Goal: {p_goal}. Timeline: {p_timeline}. Include Risk Management and V&V."
-                plan = st.session_state.ai.generate(prompt, temperature=0.5)
-                st.session_state.generated_plan = plan
-    
-    if 'generated_plan' in st.session_state:
-        st.markdown("---")
-        st.markdown(st.session_state.generated_plan)
-        st.download_button("Download Plan", st.session_state.generated_plan, "Quality_Plan.md")
+        if 'strategy_doc' in st.session_state:
+            st.text_area("Generated Content", st.session_state.strategy_doc, height=500)
+            st.download_button("Download .MD", st.session_state.strategy_doc, "plan.md")
 
-# --- 6. MAIN APP ---
+# --- 6. MAIN APP LOOP ---
 def main():
-    render_header()
-    st.markdown("---")
+    nav_choice = render_sidebar()
     
-    # Sidebar Navigation
-    with st.sidebar:
-        st.image("https://via.placeholder.com/150x50?text=VIVE+HEALTH", use_column_width=True) # Replace with logo if available
-        st.markdown("### Navigation")
-        
-        nav_options = ["Dashboard", "Categorizer", "Vision Intelligence", "CAPA Manager", "Strategy Planner"]
-        
-        # Handle cross-module navigation
-        default_idx = 0
-        if 'nav_selection' in st.session_state:
-            if st.session_state.nav_selection in nav_options:
-                default_idx = nav_options.index(st.session_state.nav_selection)
-        
-        selection = st.radio("", nav_options, index=default_idx, label_visibility="collapsed")
-        st.session_state.nav_selection = selection
-        
-        st.markdown("---")
-        st.caption(f"v8.2 Enterprise | {datetime.now().strftime('%Y-%m-%d')}")
-        
-        if not st.session_state.ai.available:
-            with st.expander("Troubleshoot Connection"):
-                st.error("API Keys not detected.")
-                st.markdown("Ensure `.streamlit/secrets.toml` contains:")
-                st.code('GOOGLE_API_KEY = "..."\nOPENAI_API_KEY = "..."', language="toml")
-                if st.session_state.ai.error_log:
-                    st.text("Logs:")
-                    for err in st.session_state.ai.error_log:
-                        st.caption(err)
-
-    # Router
-    if selection == "Dashboard": render_dashboard()
-    elif selection == "Categorizer": render_categorizer()
-    elif selection == "Vision Intelligence": render_vision()
-    elif selection == "CAPA Manager": render_capa()
-    elif selection == "Strategy Planner": render_strategy()
+    if nav_choice == "Executive Dashboard": render_dashboard()
+    elif nav_choice == "Smart Categorizer": render_categorizer()
+    elif nav_choice == "Vision Diagnostics": render_vision()
+    elif nav_choice == "CAPA Suite": render_capa()
+    elif nav_choice == "Strategy & Compliance": render_strategy()
 
 if __name__ == "__main__":
     main()
