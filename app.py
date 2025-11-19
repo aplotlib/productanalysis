@@ -11,18 +11,24 @@ from datetime import datetime
 
 # --- 1. SYSTEM CONFIGURATION ---
 st.set_page_config(
-    page_title="VIVE Health | Product Lifecycle Intelligence",
-    page_icon="🧬",
+    page_title="O.R.I.O.N. | VIVE Health",
+    page_icon="✨",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# --- VIVE "NORTH STAR" THEME (HIGH CONTRAST) ---
+# --- O.R.I.O.N. THEME (High Contrast / Leadership Ready) ---
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;600;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;800&display=swap');
 
-    /* DEEP SPACE BACKGROUND */
+    /* CORE PALETTE: VIVE TEAL (#00C6D7), DEEP NAVY (#020408), WHITE */
+    
+    /* BACKGROUND: Subtle Moving Stars */
+    @keyframes move-twink-back {
+        from {background-position:0 0;}
+        to {background-position:-10000px 5000px;}
+    }
     .stApp {
         background-color: #020408 !important;
         background-image: 
@@ -33,96 +39,97 @@ st.markdown("""
         color: #ffffff !important;
     }
 
-    /* TYPOGRAPHY */
-    h1, h2, h3, h4, p, div, span {
+    /* TYPOGRAPHY: Montserrat - Crisp & Readable */
+    h1, h2, h3, h4, p, div, span, li, label {
         font-family: 'Montserrat', sans-serif !important;
         color: white !important;
     }
+    
     h1 {
-        text-transform: uppercase;
         font-weight: 800;
-        letter-spacing: 2px;
-        background: linear-gradient(90deg, #00C6D7 0%, #ffffff 100%);
+        letter-spacing: 3px;
+        text-transform: uppercase;
+        background: linear-gradient(90deg, #00C6D7 0%, #ffffff 80%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-    }
-
-    /* CONTAINER STYLING */
-    .stContainer, div[data-testid="metric-container"], .report-box {
-        background-color: rgba(13, 23, 33, 0.95) !important;
-        border: 1px solid #1e293b;
-        border-radius: 10px;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-        padding: 20px;
-    }
-
-    /* METRICS */
-    div[data-testid="metric-container"] {
-        border-left: 4px solid #00C6D7;
-        transition: transform 0.2s;
-    }
-    div[data-testid="metric-container"]:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 0 20px rgba(0, 198, 215, 0.3);
-    }
-    div[data-testid="metric-container"] label {
-        color: #00C6D7 !important;
-        font-weight: 600;
-    }
-    div[data-testid="metric-container"] div[data-testid="stMetricValue"] {
-        font-size: 2rem;
-        font-weight: 800;
-    }
-
-    /* SIDEBAR */
-    section[data-testid="stSidebar"] {
-        background-color: #000000 !important;
-        border-right: 1px solid #333;
+        margin-bottom: 0px;
     }
     
-    /* BUTTONS */
+    .subtitle {
+        font-size: 1.2rem;
+        color: #94a3b8 !important;
+        letter-spacing: 1px;
+        margin-bottom: 30px;
+    }
+
+    /* CARDS: High Contrast - No Transparency Issues */
+    .stContainer, .metric-box, .report-box, div[data-testid="metric-container"] {
+        background-color: #0B1221 !important; /* Solid Dark Navy */
+        border: 1px solid #1e293b;
+        border-radius: 8px;
+        padding: 24px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+    }
+
+    /* METRICS: Big & Bold */
+    div[data-testid="metric-container"] label {
+        color: #00C6D7 !important;
+        font-size: 0.85rem;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+    div[data-testid="metric-container"] div[data-testid="stMetricValue"] {
+        font-size: 2.5rem;
+        font-weight: 800;
+        color: white !important;
+    }
+
+    /* SIDEBAR: Minimalist */
+    section[data-testid="stSidebar"] {
+        background-color: #000000 !important;
+        border-right: 1px solid #1e293b;
+    }
+    
+    /* BUTTONS: Action Oriented */
     .stButton>button {
         background: #00C6D7 !important;
         color: #000000 !important;
         border: none;
-        font-weight: 800 !important;
+        font-weight: 700 !important;
         text-transform: uppercase;
+        letter-spacing: 1px;
         border-radius: 4px;
-        height: 3em;
+        height: 3.5em;
+        transition: all 0.2s;
     }
     .stButton>button:hover {
-        background: #ffffff !important;
-        box-shadow: 0 0 15px #00C6D7;
+        background: white !important;
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(0, 198, 215, 0.4);
     }
 
-    /* INPUTS */
+    /* INPUTS: Readable Dark Mode */
     .stTextInput input, .stSelectbox div[data-baseweb="select"] div, .stTextArea textarea {
-        background-color: #0f172a !important;
+        background-color: #161f30 !important;
         color: white !important;
         border: 1px solid #334155;
+        border-radius: 4px;
+    }
+    .stDataFrame {
+        border: 1px solid #334155;
+        border-radius: 4px;
     }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. CORE ENGINE (AI & LOGGING) ---
-if 'system_log' not in st.session_state:
-    st.session_state.system_log = []
-
-def log_event(action, icon="🔵"):
-    """Logs real user actions to the 'Live Activity' feed."""
-    timestamp = datetime.now().strftime("%H:%M:%S")
-    st.session_state.system_log.insert(0, {"time": timestamp, "action": action, "icon": icon})
-
-class AIHandler:
+# --- 2. AI & INTELLIGENCE LAYER ---
+class IntelligenceEngine:
     def __init__(self):
         self.available = False
-        self.model = None
-        self.vision = None
-        
         try:
             import google.generativeai as genai
             self.genai = genai
-            # Key Priority: Streamlit Secrets > Env Var > Manual
+            # Check environment or secrets
             key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
             if key: self.configure(key)
         except ImportError:
@@ -138,342 +145,375 @@ class AIHandler:
             self.available = False
 
     def generate(self, prompt):
-        if not self.available: return "⚠️ AI Offline"
+        if not self.available: return "⚠️ Neural Engine Offline. Check API Key."
         try:
             return self.model.generate_content(prompt).text
         except Exception as e:
-            return f"AI Error: {e}"
+            return f"Error: {e}"
 
     def analyze_vision(self, image, prompt):
-        if not self.available: return "⚠️ AI Offline"
+        if not self.available: return "⚠️ Neural Engine Offline."
         try:
             return self.vision.generate_content([prompt, image]).text
         except Exception as e:
-            return f"Vision Error: {e}"
+            return f"Error: {e}"
 
-if 'ai' not in st.session_state: st.session_state.ai = AIHandler()
+if 'ai' not in st.session_state: st.session_state.ai = IntelligenceEngine()
 
-# --- 3. ANALYTICS ENGINE ---
-class PerformanceAnalyzer:
+# --- 3. DATA PARSER (ODOO SPECIALIST) ---
+class DataParser:
     @staticmethod
-    def clean_cols(df):
-        """Normalizes column names to standard internal IDs."""
+    def normalize_columns(df):
+        """Standardizes messy Odoo/Excel headers to VIVE Internal Names."""
         col_map = {
-            'date': 'Date', 'created on': 'Date', 'return date': 'Date',
-            'product': 'Product', 'sku': 'Product', 'item': 'Product',
+            'date': 'Date', 'created on': 'Date', 'order date': 'Date',
+            'product': 'Product', 'sku': 'Product', 'product title': 'Product',
             'qty': 'Qty', 'quantity': 'Qty', 'returns': 'Returns', 'return qty': 'Returns',
             'sales': 'Sales', 'sold': 'Sales', 'order qty': 'Sales',
-            'reason': 'Reason', 'return reason': 'Reason', 'disposition': 'Reason'
+            'reason': 'Reason', 'return reason': 'Reason', 'disposition': 'Reason',
+            'ticket': 'Ticket', 'ticket id': 'Ticket', 'stage': 'Stage', 'status': 'Stage'
         }
         df.columns = [col_map.get(c.lower().strip(), c) for c in df.columns]
         return df
 
     @staticmethod
-    def process_performance_file(file):
+    def process_file(file):
+        """
+        Smart-scans the file to find the actual header row, 
+        skipping metadata often found in Odoo exports.
+        """
         try:
+            # Read raw bytes to sniff structure
+            content = file.getvalue().decode("utf-8", errors='replace')
+            lines = content.split('\n')
+            
+            # Scoring system to find the best header row
+            keywords = ['product', 'sku', 'date', 'qty', 'sales', 'return', 'ticket', 'stage']
+            best_idx = 0
+            max_score = 0
+            
+            for i, line in enumerate(lines[:20]):
+                score = sum(1 for k in keywords if k in line.lower())
+                if score > max_score:
+                    max_score = score
+                    best_idx = i
+            
+            # Parse
+            file.seek(0)
             if file.name.endswith('.csv'):
-                df = pd.read_csv(file)
+                df = pd.read_csv(file, header=best_idx)
             else:
-                df = pd.read_excel(file)
+                df = pd.read_excel(file, header=best_idx)
             
-            df = PerformanceAnalyzer.clean_cols(df)
+            df = DataParser.normalize_columns(df)
             
-            # Ensure Date parsing
+            # Type Handling
             if 'Date' in df.columns:
                 df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+                df = df.dropna(subset=['Date']) # Drop rows without dates if date column exists
                 df = df.sort_values('Date')
-
-            # Logic: If Sales and Returns columns exist, calculate Rate
-            if 'Sales' in df.columns and 'Returns' in df.columns:
-                df['Return Rate'] = (df['Returns'] / df['Sales']) * 100
-            
+                
             return df, None
         except Exception as e:
             return None, str(e)
 
-# --- 4. UI MODULES ---
+# --- 4. UI SECTIONS ---
 
 def render_dashboard():
-    st.markdown("<h1>Executive Command Center</h1>", unsafe_allow_html=True)
+    st.markdown("<h1>O.R.I.O.N.</h1>", unsafe_allow_html=True)
+    st.markdown("<div class='subtitle'>Operational Review & Intelligence Optimization Network</div>", unsafe_allow_html=True)
     
-    # -- STATE MANAGEMENT FOR DATA --
-    if 'dash_data' not in st.session_state: st.session_state.dash_data = None
+    # --- STATE: DATA HOLDER ---
+    if 'orion_data' not in st.session_state: st.session_state.orion_data = None
     
-    # -- SECTION 1: DATA INGESTION (NO FAKE DATA) --
-    if st.session_state.dash_data is None:
-        with st.container():
-            st.markdown("### 📡 System Ready. Awaiting Data Stream.")
-            st.info("Upload Sales & Return Reports (Excel/CSV) to initialize the Command Center visualization.")
+    # --- A: EMPTY STATE (WAITING FOR SIGNAL) ---
+    if st.session_state.orion_data is None:
+        c1, c2 = st.columns([2, 1])
+        with c1:
+            st.info("📡 **Awaiting Data Signal**")
+            st.markdown("Upload Raw Odoo Exports or Sales/Return Logs to activate the Command Center.")
             
-            up_file = st.file_uploader("Upload Performance Data", type=['csv', 'xlsx'])
-            if up_file:
-                df, err = PerformanceAnalyzer.process_performance_file(up_file)
+            f = st.file_uploader("Select Data Source (CSV/XLSX)", type=['csv', 'xlsx'])
+            if f:
+                df, err = DataParser.process_file(f)
                 if err:
-                    st.error(f"Ingestion Failed: {err}")
+                    st.error(f"Parsing Error: {err}")
                 else:
-                    st.session_state.dash_data = df
-                    log_event(f"Data Ingested: {up_file.name} ({len(df)} records)", "💾")
-                    st.success("Data Stream Active")
+                    st.session_state.orion_data = df
+                    st.success(f"Signal Acquired: {len(df)} Records")
+                    time.sleep(1)
                     st.rerun()
+        with c2:
+            st.markdown("### Capabilities")
+            st.markdown("""
+            * **Auto-Detection:** Returns, Sales, Tickets
+            * **Seasonality:** Monthly Trend Analysis
+            * **Reason Shifts:** Defect Pattern Recognition
+            * **AI Analyst:** Root Cause Hypothesis
+            """)
 
-    # -- SECTION 2: LIVE DASHBOARD (ONLY IF DATA EXISTS) --
+    # --- B: ACTIVE COMMAND CENTER ---
     else:
-        df = st.session_state.dash_data
+        df = st.session_state.orion_data
         
-        # -- METRICS CALCULATION --
-        # Dynamic metrics based on uploaded data
-        total_sales = df['Sales'].sum() if 'Sales' in df.columns else 0
-        total_returns = df['Returns'].sum() if 'Returns' in df.columns else 0
-        avg_rate = (total_returns / total_sales * 100) if total_sales > 0 else 0
+        # Metric Logic
+        sales = df['Sales'].sum() if 'Sales' in df.columns else 0
+        returns = df['Returns'].sum() if 'Returns' in df.columns else 0
+        rate = (returns/sales*100) if sales > 0 else 0
         
-        # Render Metrics
+        # 1. TOP LEVEL METRICS
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Total Sales Volume", f"{total_sales:,.0f}")
-        m2.metric("Total Returns", f"{total_returns:,.0f}")
-        m3.metric("Avg Return Rate", f"{avg_rate:.2f}%")
-        m4.metric("Data Points", len(df))
+        m1.metric("Records Parsed", f"{len(df):,}")
+        m2.metric("Total Volume", f"{sales:,.0f}" if sales else "--")
+        m3.metric("Returns Detected", f"{returns:,.0f}" if returns else "--")
+        m4.metric("Return Rate", f"{rate:.2f}%" if sales else "N/A")
         
         st.markdown("---")
         
-        # -- VISUALIZATION & INSIGHTS --
-        c1, c2 = st.columns([2.5, 1])
+        # 2. VISUAL INTELLIGENCE
+        c1, c2 = st.columns([2, 1])
         
         with c1:
-            st.markdown("### 📉 Performance & Seasonality Analysis")
-            
-            if 'Date' in df.columns and 'Return Rate' in df.columns:
-                # Time Series Chart
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(
-                    x=df['Date'], y=df['Return Rate'], 
-                    mode='lines+markers', 
-                    name='Return Rate %',
-                    line=dict(color='#FF0055', width=3)
-                ))
-                if 'Sales' in df.columns:
-                     fig.add_trace(go.Bar(
-                        x=df['Date'], y=df['Sales'], 
-                        name='Sales Volume', 
-                        yaxis='y2',
-                        marker_color='rgba(0, 198, 215, 0.2)'
-                    ))
+            st.markdown("### 📉 Trend Analysis")
+            if 'Date' in df.columns:
+                # Monthly Aggregation
+                df['Month'] = df['Date'].dt.to_period('M').astype(str)
+                monthly = df.groupby('Month')[['Sales', 'Returns']].sum().reset_index() if 'Sales' in df.columns else df.groupby('Month').size().reset_index(name='Count')
                 
-                fig.update_layout(
-                    template="plotly_dark",
-                    paper_bgcolor="rgba(0,0,0,0)",
-                    plot_bgcolor="rgba(0,0,0,0)",
-                    height=450,
-                    yaxis=dict(title="Return Rate %", gridcolor="#333"),
-                    yaxis2=dict(title="Sales Volume", overlaying='y', side='right'),
-                    legend=dict(orientation="h", y=1.1)
-                )
+                fig = go.Figure()
+                
+                if 'Sales' in df.columns:
+                    monthly['Rate'] = (monthly['Returns'] / monthly['Sales']) * 100
+                    fig.add_trace(go.Bar(x=monthly['Month'], y=monthly['Sales'], name='Sales', marker_color='#1e293b'))
+                    fig.add_trace(go.Scatter(x=monthly['Month'], y=monthly['Rate'], name='Return Rate %', yaxis='y2', line=dict(color='#00C6D7', width=4)))
+                    
+                    fig.update_layout(
+                        template="plotly_dark",
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        plot_bgcolor="rgba(0,0,0,0)",
+                        height=400,
+                        yaxis2=dict(title="Rate %", overlaying='y', side='right'),
+                        legend=dict(orientation="h", y=1.1)
+                    )
+                else:
+                    # Generic Time Series
+                    col = 'Count' if 'Count' in monthly.columns else df.columns[0]
+                    fig.add_trace(go.Scatter(x=monthly['Month'], y=monthly[col], line=dict(color='#00C6D7')))
+                    
                 st.plotly_chart(fig, use_container_width=True)
-            
-            # Reason Analysis (If 'Reason' column exists)
-            if 'Reason' in df.columns:
-                st.markdown("#### Return Reason Shifts")
-                reason_counts = df.groupby('Reason')['Returns'].sum().reset_index()
-                fig2 = px.bar(reason_counts, x='Reason', y='Returns', color='Returns', color_continuous_scale=['#00C6D7', '#FF0055'])
-                fig2.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-                st.plotly_chart(fig2, use_container_width=True)
+            else:
+                st.warning("No Date column detected for Time Series analysis.")
 
         with c2:
-            st.markdown("### 🧠 AI Strategic Analyst")
-            if st.button("Analyze Context & Trends", type="primary"):
-                with st.spinner("AI analyzing seasonality, spikes, and vendor correlations..."):
-                    # Serialize data for AI
-                    summary = df.describe().to_string()
-                    head = df.head(10).to_string()
+            st.markdown("### 🧠 AI Context Analyst")
+            if st.button("RUN HYPOTHESIS ENGINE", type="primary"):
+                with st.spinner("Analyzing seasonality and defect vectors..."):
+                    summ = df.describe(include='all').to_string()
                     prompt = f"""
-                    You are a Senior Quality Analyst. Analyze this Sales/Return data.
-                    Data Summary: {summary}
-                    First 10 Rows: {head}
+                    You are the O.R.I.O.N. AI. Analyze this product performance data.
+                    Summary: {summ}
                     
-                    1. Identify any seasonality or spikes in Return Rate.
-                    2. Hypothesize why (e.g., "Did a vendor change material in Q3?").
-                    3. Suggest immediate actions.
+                    1. Detect shifts in patterns (Seasonality? Spikes?).
+                    2. Hypothesize a Root Cause (e.g. "Did vendor specs change in Q3?").
+                    3. Suggest 1 actionable move for Leadership.
                     """
                     analysis = st.session_state.ai.generate(prompt)
                     st.info(analysis)
-                    log_event("AI Strategic Analysis Generated", "🧠")
             
-            st.divider()
-            st.markdown("### 🛰️ Live Session Log")
-            for event in st.session_state.system_log:
-                st.markdown(f"`{event['time']}` {event['icon']} {event['action']}")
-                
-            if st.button("🗑️ Clear Data", use_container_width=True):
-                st.session_state.dash_data = None
+            st.markdown("### Actions")
+            if st.button("🗑️ Reset Signal"):
+                st.session_state.orion_data = None
                 st.rerun()
 
-def render_quality_planning():
-    st.markdown("<h1>Quality Strategy Planner</h1>", unsafe_allow_html=True)
+def render_voc():
+    st.markdown("<h1>Vision Intelligence</h1>", unsafe_allow_html=True)
+    st.markdown("<div class='subtitle'>Screenshot & Review Parser</div>", unsafe_allow_html=True)
     
-    keys = ["qp_name", "qp_risk", "qp_mkts", "qp_scope", "qp_regs", "qp_test", "qp_vend", "qp_path"]
-    for k in keys: 
-        if k not in st.session_state: st.session_state[k] = ""
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("### 📥 Upload Evidence")
+        st.caption("Amazon Dashboards, Customer Photos, Return Reports")
+        img = st.file_uploader("Select Image", type=['png', 'jpg'])
+        
+        if img:
+            st.image(img, use_column_width=True)
+            if st.button("SCAN & EXTRACT", type="primary"):
+                with st.spinner("Extracting Text & Metrics..."):
+                    prompt = """
+                    Analyze this screenshot for Quality Leadership.
+                    1. Extract key metrics (Star Rating, NCX, Return Rate).
+                    2. Identify the top 3 specific defect keywords.
+                    3. Summarize the 'Voice of Customer' sentiment.
+                    """
+                    st.session_state.voc_res = st.session_state.ai.analyze_vision(Image.open(img), prompt)
+    
+    with c2:
+        st.markdown("### 📝 Extraction Results")
+        if 'voc_res' in st.session_state:
+            st.success("Intelligence Extracted")
+            st.markdown(st.session_state.voc_res)
+            
+            st.divider()
+            if st.button("🛡️ Initiate CAPA from Findings"):
+                st.session_state.capa_prefill = st.session_state.voc_res
+                st.session_state.nav = "CAPA"
+                st.rerun()
+        else:
+            st.info("Waiting for scan...")
+
+def render_plan():
+    st.markdown("<h1>Strategic Planner</h1>", unsafe_allow_html=True)
+    
+    # State Init
+    if 'qp_risk' not in st.session_state: st.session_state.qp_risk = "Class I"
     
     with st.container():
         c1, c2 = st.columns(2)
-        st.session_state.qp_name = c1.text_input("Project Name / SKU", st.session_state.qp_name)
-        st.session_state.qp_risk = c2.selectbox("Risk Classification", ["Class I", "Class II", "Class III"])
-        st.session_state.qp_mkts = st.multiselect("Markets", ["USA", "EU", "UK", "CAN"], default=["USA"])
-
+        name = c1.text_input("Project / SKU Name", placeholder="Ex: Bariatric Rollator Gen 2")
+        risk = c2.selectbox("Risk Classification", ["Class I", "Class II", "Class III"])
+        st.session_state.qp_risk = risk
+    
     st.divider()
     
-    c_left, c_right = st.columns([1.2, 1])
+    c_edit, c_view = st.columns([1.3, 1])
     
-    sections = [
-        ("scope", "Scope", "Objectives & Deliverables"),
-        ("regs", "Regulatory", "ISO 13485, FDA, MDR"),
-        ("test", "Validation", "Testing Requirements"),
-        ("vend", "Supply Chain", "Vendor Controls"),
-        ("path", "Critical Path", "Timeline")
-    ]
+    sections = {
+        "scope": "Scope & Objectives",
+        "regs": "Regulatory Strategy",
+        "test": "Validation Plan",
+        "vend": "Vendor Controls"
+    }
     
-    with c_left:
-        st.markdown("### 📝 AI-Assisted Drafting")
+    with c_edit:
+        st.markdown("### 🛠️ Strategy Modules")
         locks = {}
-        for code, title, hint in sections:
-            with st.expander(title, expanded=True):
-                l, t = st.columns([0.2, 1])
-                locks[code] = l.checkbox("Lock", key=f"lock_{code}")
-                st.session_state[f"qp_{code}"] = t.text_area("Content", st.session_state[f"qp_{code}"], height=100, placeholder=hint, label_visibility="collapsed")
+        for key, label in sections.items():
+            with st.expander(label, expanded=True):
+                lock = st.checkbox(f"Lock {label}", key=f"lock_{key}")
+                locks[key] = lock
+                st.session_state[f"qp_{key}"] = st.text_area("Draft", key=f"txt_{key}", height=100, label_visibility="collapsed")
         
-        if st.button("✨ Generate / Optimize Plan", type="primary"):
-            with st.spinner("AI Optimizing..."):
-                ctx = f"Project: {st.session_state.qp_name}. Risk: {st.session_state.qp_risk}."
-                for c, t, _ in sections:
-                    if not locks[c]:
-                        p = f"Write professional Quality Plan section '{t}'. Context: {ctx}. User draft: {st.session_state[f'qp_{c}']}. No Markdown."
-                        st.session_state[f"qp_{c}"] = st.session_state.ai.generate(p)
+        if st.button("✨ AI: COMPLIANCE OPTIMIZATION", type="primary"):
+            with st.spinner("Optimizing against ISO/FDA standards..."):
+                ctx = f"Project: {name}, Risk: {risk}"
+                for k, label in sections.items():
+                    if not locks[k]:
+                        draft = st.session_state[f"qp_{k}"]
+                        p = f"Write professional Quality Plan section '{label}'. Context: {ctx}. User Draft: {draft}. No Markdown."
+                        st.session_state[f"qp_{k}"] = st.session_state.ai.generate(p)
                         time.sleep(0.5)
-                log_event(f"Plan Generated: {st.session_state.qp_name}", "📄")
-                st.success("Plan Updated")
                 st.rerun()
 
-    with c_right:
-        st.markdown("### 📄 Preview")
-        full = f"QUALITY PLAN: {st.session_state.qp_name.upper()}\nDATE: {datetime.now().date()}\nRISK: {st.session_state.qp_risk}\n\n"
-        for c, t, _ in sections:
-            full += f"{t.upper()}\n{'-'*len(t)}\n{st.session_state[f'qp_{c}']}\n\n"
-        st.text_area("Final Doc", full, height=600)
-        st.download_button("📥 Download .txt", full, file_name="plan.txt")
+    with c_view:
+        st.markdown("### 📄 Executive Summary")
+        full = f"QUALITY STRATEGY: {name.upper()}\nRISK: {risk}\nDATE: {datetime.now().date()}\n\n"
+        for k, label in sections.items():
+            full += f"{label.upper()}\n{'-'*len(label)}\n{st.session_state.get(f'qp_{k}', '')}\n\n"
+        st.text_area("Preview", full, height=600)
+        st.download_button("📥 Download Strategy", full, file_name="Strategy.txt")
 
-def render_market_intel():
-    st.markdown("<h1>Market Intelligence (VoC)</h1>", unsafe_allow_html=True)
+def render_supply():
+    st.markdown("<h1>Supply Chain Validator</h1>", unsafe_allow_html=True)
     
-    tab1, tab2 = st.tabs(["👁️ Vision Analysis", "📊 Data Parser"])
+    tab1, tab2 = st.tabs(["Single Stream Analysis", "⚖️ Compare / Effectiveness Loop"])
     
     with tab1:
-        c1, c2 = st.columns([1, 1])
-        with c1:
-            st.info("Upload Amazon Review Dashboard / Return Report Screenshot")
-            img_file = st.file_uploader("Source Image", type=['png', 'jpg'])
-            if img_file:
-                img = Image.open(img_file)
-                st.image(img, caption="Target", use_column_width=True)
-                if st.button("🔍 Analyze Vision", type="primary"):
-                    with st.spinner("Extracting Intelligence..."):
-                        prompt = """
-                        Analyze this screenshot. 
-                        1. Extract Statistics (Star Rating, Return %, etc).
-                        2. Identify Top 3 Defects.
-                        3. Sentiment Analysis.
-                        4. Recommended CAPA Actions.
-                        """
-                        st.session_state.voc_res = st.session_state.ai.analyze_vision(img, prompt)
-                        log_event("Vision Analysis Complete", "👁️")
-        with c2:
-            if 'voc_res' in st.session_state:
-                st.markdown("### 🤖 Intelligence Report")
-                st.write(st.session_state.voc_res)
-                if st.button("🚨 Create CAPA"):
-                    st.session_state.capa_prefill = st.session_state.voc_res
-                    st.session_state.nav = "CAPA Manager"
-                    st.rerun()
-    
-    with tab2:
-        st.markdown("### 📊 Upload Review Data")
-        f = st.file_uploader("Upload Reviews (CSV)", type=['csv'])
+        f = st.file_uploader("Upload Odoo Export", type=['csv', 'xlsx'], key="sc_up")
         if f:
-            df = pd.read_csv(f)
-            st.dataframe(df.head())
-            if st.button("Analyze Sentiment"):
-                st.info(st.session_state.ai.generate(f"Analyze sentiment of these reviews: {df.head(10).to_string()}"))
+            df, err = DataParser.process_file(f)
+            if err: st.error(err)
+            else:
+                st.success(f"Loaded {len(df)} rows")
+                st.dataframe(df.head())
+                if st.button("Run Risk Audit"):
+                    st.info(st.session_state.ai.generate(f"Audit this supply chain data for risks (stockouts/overstock): {df.head(15).to_string()}"))
 
-def render_supply_chain():
-    st.markdown("<h1>Supply Chain Analytics</h1>", unsafe_allow_html=True)
-    st.info("Smart Parser for Odoo Exports (Inventory/Helpdesk)")
-    
-    f = st.file_uploader("Upload Odoo Export", type=['csv', 'xlsx'])
-    if f:
-        df, err = PerformanceAnalyzer.process_performance_file(f)
-        if err:
-            st.error(err)
-        else:
-            st.success(f"Loaded {len(df)} rows")
-            st.dataframe(df.head())
+    with tab2:
+        st.markdown("### 🔄 Effectiveness Check")
+        st.markdown("Upload **Before** and **After** datasets to validate Quality Initiatives.")
+        
+        c1, c2 = st.columns(2)
+        f1 = c1.file_uploader("Baseline (Before)", type=['csv', 'xlsx'], key="f1")
+        f2 = c2.file_uploader("Current (After)", type=['csv', 'xlsx'], key="f2")
+        
+        if f1 and f2:
+            df1, _ = DataParser.process_file(f1)
+            df2, _ = DataParser.process_file(f2)
             
-            if st.button("Generate Insights"):
-                st.info(st.session_state.ai.generate(f"Analyze Supply Chain Data: {df.head(10).to_string()}"))
+            if df1 is not None and df2 is not None:
+                # Simple Return Rate Comparison Logic
+                r1 = (df1['Returns'].sum() / df1['Sales'].sum() * 100) if 'Sales' in df1.columns else 0
+                r2 = (df2['Returns'].sum() / df2['Sales'].sum() * 100) if 'Sales' in df2.columns else 0
+                
+                diff = r2 - r1
+                color = "#00ff00" if diff < 0 else "#ff0000"
+                
+                st.markdown("#### Impact Result")
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Baseline Rate", f"{r1:.2f}%")
+                m2.metric("Current Rate", f"{r2:.2f}%")
+                m3.metric("Net Change", f"{diff:.2f}%", delta_color="inverse")
+                
+                if diff < 0:
+                    st.success("✅ IMPROVEMENT CONFIRMED: Quality Initiative Effective.")
+                else:
+                    st.error("⚠️ NO IMPROVEMENT: Re-evaluate Strategy.")
 
 def render_capa():
     st.markdown("<h1>CAPA Manager</h1>", unsafe_allow_html=True)
     
     prefill = st.session_state.get("capa_prefill", "")
-    if prefill:
-        st.success("Using VoC Intelligence Data")
-        del st.session_state.capa_prefill
-        
-    tabs = st.tabs(["Intake", "RCA", "Action", "Close"])
     
-    with tabs[0]:
-        c1, c2 = st.columns(2)
-        c1.text_input("ID", f"CAPA-{int(time.time())}", disabled=True)
-        c2.select_slider("Risk", ["Low", "Medium", "High", "Critical"])
-        st.text_area("Issue Description", value=prefill, height=150)
+    c1, c2 = st.columns([2, 1])
+    with c1:
+        st.markdown("### Incident Details")
+        st.text_input("CAPA ID", f"CAPA-{int(time.time())}", disabled=True)
+        st.text_area("Description / Non-Conformance", value=prefill, height=150)
         
-    with tabs[1]:
-        w1 = st.text_input("1. Why?")
-        if st.button("🤖 AI RCA Coach"):
-            if w1: st.write(st.session_state.ai.generate(f"Root cause for: {w1}"))
-            
-    with tabs[3]:
-        if st.button("Close CAPA", type="primary"):
-            log_event("CAPA Closed", "✅")
-            st.balloons()
+    with c2:
+        st.markdown("### Risk & Owner")
+        st.select_slider("Severity", ["Minor", "Major", "Critical"])
+        st.selectbox("Owner", ["Quality", "Product", "Ops"])
+        if st.button("🤖 AI RCA Assist"):
+            st.write(st.session_state.ai.generate("Give me 3 potential root causes for a generic product defect."))
 
-# --- 5. MAIN CONTROLLER ---
+# --- 5. MAIN ---
 def main():
     with st.sidebar:
-        st.title("PLI SYSTEM")
-        st.caption("VIVE HEALTH v4.0")
+        st.markdown("## O.R.I.O.N.")
+        st.caption("v5.0 | LEADERSHIP BUILD")
         
         if not st.session_state.ai.available:
-            st.error("AI Offline")
+            st.warning("AI Offline")
             k = st.text_input("API Key", type="password")
             if k: 
                 st.session_state.ai.configure(k)
                 st.rerun()
         else:
             st.success("AI Online")
-
+            
         st.markdown("---")
         
-        menu = ["Dashboard", "Quality Planning", "Market Intelligence", "Supply Chain", "CAPA Manager"]
         if 'nav' not in st.session_state: st.session_state.nav = "Dashboard"
         
-        for item in menu:
-            if st.button(item, use_container_width=True):
-                st.session_state.nav = item
+        opts = {
+            "Dashboard": "📊",
+            "Vision Intel": "👁️",
+            "Strategy Plan": "📝",
+            "Supply Chain": "📦",
+            "CAPA": "🛡️"
+        }
+        
+        for label, icon in opts.items():
+            if st.button(f"{icon}  {label}", use_container_width=True):
+                st.session_state.nav = label
                 st.rerun()
 
     if st.session_state.nav == "Dashboard": render_dashboard()
-    elif st.session_state.nav == "Quality Planning": render_quality_planning()
-    elif st.session_state.nav == "Market Intelligence": render_market_intel()
-    elif st.session_state.nav == "Supply Chain": render_supply_chain()
-    elif st.session_state.nav == "CAPA Manager": render_capa()
+    elif st.session_state.nav == "Vision Intel": render_voc()
+    elif st.session_state.nav == "Strategy Plan": render_plan()
+    elif st.session_state.nav == "Supply Chain": render_supply()
+    elif st.session_state.nav == "CAPA": render_capa()
 
 if __name__ == "__main__":
     main()
