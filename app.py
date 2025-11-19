@@ -122,18 +122,40 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. AI & INTELLIGENCE LAYER ---
+# --- 2. AI & INTELLIGENCE LAYER (ROBUST INITIALIZATION) ---
 class IntelligenceEngine:
     def __init__(self):
         self.available = False
+        self.model = None
+        self.vision = None
+        self._initialize_ai_clients()
+
+    def _initialize_ai_clients(self):
+        """Initialize AI clients from Streamlit secrets (Requested Pattern)"""
         try:
             import google.generativeai as genai
             self.genai = genai
-            # Check environment or secrets
-            key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
-            if key: self.configure(key)
-        except ImportError:
-            pass
+            
+            api_key = None
+            # Check Streamlit Secrets for preferred keys
+            if 'GEMINI_API_KEY' in st.secrets:
+                api_key = st.secrets['GEMINI_API_KEY']
+            elif 'GOOGLE_API_KEY' in st.secrets:
+                api_key = st.secrets['GOOGLE_API_KEY']
+            
+            # Fallback to Environment Variable
+            if not api_key:
+                api_key = os.environ.get("GEMINI_API_KEY")
+            
+            if api_key:
+                self.configure(api_key)
+            else:
+                # Fail silently here, UI will show "Offline" status
+                self.available = False
+                
+        except Exception as e:
+            st.error(f"Error initializing AI clients: {e}")
+            self.available = False
 
     def configure(self, key):
         try:
@@ -481,17 +503,18 @@ def render_capa():
 def main():
     with st.sidebar:
         st.markdown("## O.R.I.O.N.")
-        st.caption("v5.0 | LEADERSHIP BUILD")
+        st.caption("v5.1 | LEADERSHIP BUILD")
         
-        if not st.session_state.ai.available:
-            st.warning("AI Offline")
-            k = st.text_input("API Key", type="password")
+        # CHECK FOR API KEY & STATUS
+        if st.session_state.ai.available:
+            st.success("✅ AI Neural Engine Connected")
+        else:
+            st.error("⚠️ AI Offline")
+            k = st.text_input("API Key", type="password", help="Enter GEMINI_API_KEY here if not in secrets.")
             if k: 
                 st.session_state.ai.configure(k)
                 st.rerun()
-        else:
-            st.success("AI Online")
-            
+
         st.markdown("---")
         
         if 'nav' not in st.session_state: st.session_state.nav = "Dashboard"
