@@ -12,6 +12,7 @@ except ImportError:
 class IntelligenceEngine:
     """
     The AI Core. Handles text generation, vision analysis, and CAPA drafting.
+    Supports both Google Gemini and OpenAI.
     """
     def __init__(self):
         self.client = None
@@ -88,8 +89,8 @@ class IntelligenceEngine:
                 response = model.generate_content([prompt, image])
                 return response.text
             elif "OpenAI" in self.provider:
-                # Simplified OpenAI Vision implementation could go here
-                return "Vision analysis currently optimized for Gemini."
+                # Basic fallback if using OpenAI (Vision requires specific calls)
+                return "Vision analysis currently optimized for Gemini. Please switch provider."
         except Exception as e: 
             return f"Vision Error: {str(e)}"
 
