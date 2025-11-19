@@ -25,7 +25,6 @@ class ReturnReportProcessor:
                 continue
                 
             # 2. Detect Product Row: "     [MOB1001] Folding Cane"
-            # We look for the brackets [SKU]
             if "[" in col0 and "]" in col0:
                 try:
                     # Extract SKU between brackets
@@ -34,9 +33,8 @@ class ReturnReportProcessor:
                     sku = col0[start:end]
                     product_name = col0[end+1:].strip()
                     
-                    # Assuming columns: 0=Name, 1=B2B, 2=FBM, 3=Shopify (Adjust if needed based on file)
+                    # Sum specific columns (assuming B2B, FBM, Shopify columns)
                     total = 0
-                    # Sum specific columns if they exist and are numeric
                     for i in [1, 2, 3]: 
                         if i < len(row) and pd.notna(row[i]):
                             try:
