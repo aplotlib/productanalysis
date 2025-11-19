@@ -32,11 +32,12 @@ class OdooProcessor:
         """
         try:
             df = self.smart_read(file_content)
-            # Clean column names
             df.columns = [c.strip() for c in df.columns]
             
-            # Create a fallback map if 'ID' column doesn't exist, use SKU as key
-            # Adjust 'Product' and 'SKU' column names based on your specific file header
+            # Attempt to map IDs if an ID column exists
+            if 'ID' in df.columns and 'SKU' in df.columns:
+                 self.product_id_map = pd.Series(df.SKU.values, index=df.ID.astype(str).values).to_dict()
+
             if 'SKU' in df.columns:
                 return df
             return pd.DataFrame()
@@ -51,7 +52,7 @@ class OdooProcessor:
         df = self.smart_read(file_content)
         if df.empty: return pd.DataFrame()
 
-        # Identify the messy 'Products' column (e.g., "helpdesk.ticket.products,52")
+        # Identify Columns
         product_col = next((c for c in df.columns if 'Products' in c or 'product' in c), None)
         subject_col = next((c for c in df.columns if 'Subject' in c or 'subject' in c), None)
 
@@ -82,7 +83,7 @@ class OdooProcessor:
                 'Date': row.get('Created on', pd.NaT),
                 'Subject': subject,
                 'Odoo_ID_Raw': odoo_id,
-                'Inferred_SKU': sku, # This is the money column
+                'Inferred_SKU': sku, # The extracted SKU
                 'Priority': row.get('Priority', 'Low')
             })
             
@@ -92,19 +93,17 @@ class OdooProcessor:
         """
         Fuses the three datasets into a single 'Product Performance' table.
         """
-        # Start with Inventory as the base (it has all your SKUs)
         if inventory_df is None or inventory_df.empty:
             return pd.DataFrame()
 
         master = inventory_df.copy()
         
-        # Rename SKU column for consistency
+        # Standardize Master SKU column
         if 'SKU' in master.columns:
             master.rename(columns={'SKU': 'Product SKU'}, inplace=True)
 
         # 1. Merge Helpdesk Ticket Counts
         if not helpdesk_df.empty:
-            # Count tickets per inferred SKU
             ticket_counts = helpdesk_df[helpdesk_df['Inferred_SKU'] != 'UNKNOWN']
             ticket_counts = ticket_counts['Inferred_SKU'].value_counts().reset_index()
             ticket_counts.columns = ['Product SKU', 'Ticket Count']
@@ -114,7 +113,6 @@ class OdooProcessor:
 
         # 2. Merge Returns (if available)
         if not returns_df.empty and 'SKU' in returns_df.columns:
-            # Aggregate total returns per SKU
             return_counts = returns_df.groupby('SKU')['Total Returns'].sum().reset_index()
             return_counts.rename(columns={'SKU': 'Product SKU'}, inplace=True)
             
