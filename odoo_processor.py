@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 import re
 import logging
-from datetime import datetime
+import io
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -13,6 +13,10 @@ class OdooProcessor:
     Robust data processor for Odoo exports. 
     Handles fuzzy matching, financial estimation, and multi-source merging.
     """
+
+    def __init__(self):
+        # Dictionary to map Odoo ID (e.g., '52') to SKU (e.g., 'MOB1001')
+        self.product_id_map = {} 
 
     @staticmethod
     def normalize_sku(sku):
@@ -46,6 +50,17 @@ class OdooProcessor:
     def smart_read_excel(file) -> pd.DataFrame:
         """Scans file content to find the true header row, ignoring metadata."""
         try:
+            # Handle bytes input (from Streamlit)
+            if isinstance(file, bytes):
+                file = io.BytesIO(file)
+                
+            # Try reading as CSV first (common for Odoo exports despite .xlsx name)
+            try:
+                return pd.read_csv(file)
+            except:
+                file.seek(0)
+            
+            # Fallback to Excel sniffing
             preview = pd.read_excel(file, header=None, nrows=20)
             keywords = ['sku', 'default code', 'product', 'reference', 'order', 'qty', 'sales', 'ticket', 'count', 'measure']
             
@@ -67,6 +82,71 @@ class OdooProcessor:
         except Exception as e:
             logger.error(f"Read Error: {e}")
             return pd.DataFrame()
+
+    def load_product_master(self, file):
+        """
+        Optional: Load a Product Export that has 'ID' and 'Internal Reference'.
+        This allows perfect linking of Helpdesk Tickets (ID-based) to Inventory (SKU-based).
+        """
+        df = self.smart_read_excel(file)
+        if df.empty: return
+        
+        # Find ID and SKU columns
+        id_col = next((c for c in df.columns if c == 'id' or c == 'external_id'), None)
+        sku_col = next((c for c in df.columns if 'reference' in c or 'code' in c), None)
+        
+        if id_col and sku_col:
+            # Create a map: '52' -> 'MOB1001'
+            self.product_id_map = pd.Series(
+                df[sku_col].values, index=df[id_col].astype(str).values
+            ).to_dict()
+            logger.info(f"Loaded {len(self.product_id_map)} product ID mappings.")
+
+    def process_helpdesk_file(self, file):
+        """Ingests Support Tickets to correlate complaints with returns."""
+        df = self.smart_read_excel(file)
+        if df.empty: return pd.DataFrame()
+
+        # Identify Columns
+        # Helpdesk exports often have 'Products' column with format "helpdesk.ticket.products,52"
+        product_rel_col = next((c for c in df.columns if 'products' in c), None)
+        text_cols = [c for c in df.columns if any(x in c for x in ['subject', 'desc', 'content', 'message', 'name'])]
+
+        clean_rows = []
+        for _, row in df.iterrows():
+            txt = " | ".join([str(row[c]) for c in text_cols if pd.notna(row[c])])
+            sku = "UNKNOWN"
+            odoo_id = None
+
+            # 1. Extract Odoo ID from Relation String (e.g., "helpdesk.ticket.products,52")
+            if product_rel_col and pd.notna(row[product_rel_col]):
+                val = str(row[product_rel_col])
+                if "," in val:
+                    parts = val.split(',')
+                    if len(parts) > 1 and parts[1].isdigit():
+                        odoo_id = parts[1]
+
+            # 2. Try Mapping ID -> SKU (Best Method)
+            if odoo_id and odoo_id in self.product_id_map:
+                sku = self.normalize_sku(self.product_id_map[odoo_id])
+            
+            # 3. Fallback: Regex extraction from Subject/Text (e.g. finds "MOB1027")
+            if sku == "UNKNOWN":
+                # Look for patterns like MOB1001 or SUP2047
+                match = re.search(r'\b([A-Z]{3,4}-?[0-9]{3,5}[A-Z0-9]*)\b', txt)
+                if match: 
+                    sku = self.normalize_sku(match.group(1))
+            
+            clean_rows.append({
+                'ticket_id': row.get('ticket_ids_sequence', 'N/A'),
+                'date': row.get('created_on', None),
+                'subject': txt,
+                'odoo_product_id': odoo_id,
+                'clean_sku': sku,
+                'priority': row.get('priority', 'Low')
+            })
+            
+        return pd.DataFrame(clean_rows)
 
     def process_sales_file(self, file):
         """Ingests Sales/Forecast data to establish baseline volume."""
@@ -116,32 +196,6 @@ class OdooProcessor:
         df['return_reason'] = df[reason_col].fillna('Unspecified') if reason_col else 'Unspecified'
         
         return df
-
-    def process_helpdesk_file(self, file):
-        """Ingests Support Tickets to correlate complaints with returns."""
-        df = self.smart_read_excel(file)
-        if df.empty: return pd.DataFrame()
-
-        sku_col = next((c for c in df.columns if c in ['sku', 'product']), None)
-        text_cols = [c for c in df.columns if any(x in c for x in ['subject', 'desc', 'content', 'message', 'name'])]
-
-        clean = []
-        for _, row in df.iterrows():
-            txt = " | ".join([str(row[c]) for c in text_cols if pd.notna(row[c])])
-            sku = "UNKNOWN"
-            
-            # Try explicit column first
-            if sku_col and pd.notna(row[sku_col]):
-                sku = self.normalize_sku(row[sku_col])
-            
-            # Fallback: Regex extraction from subject line
-            if sku == "UNKNOWN":
-                match = re.search(r'\b([A-Z]{3,4}-?[0-9]{3,5})\b', txt)
-                if match: sku = self.normalize_sku(match.group(1))
-
-            clean.append({'clean_sku': sku, 'ticket_text': txt})
-            
-        return pd.DataFrame(clean)
 
     def merge_datasets(self, sales_df, returns_df, helpdesk_df=None):
         """
@@ -194,7 +248,9 @@ class OdooProcessor:
 
         # 6. Merge Helpdesk (Volume Check)
         if helpdesk_df is not None and not helpdesk_df.empty:
-            counts = helpdesk_df.groupby('clean_sku').size().reset_index(name='ticket_count')
+            # Filter out UNKNOWN skus to avoid skewing data
+            valid_tickets = helpdesk_df[helpdesk_df['clean_sku'] != 'UNKNOWN']
+            counts = valid_tickets.groupby('clean_sku').size().reset_index(name='ticket_count')
             master = pd.merge(master, counts, on='clean_sku', how='left')
             master['ticket_count'] = master['ticket_count'].fillna(0)
         else:
