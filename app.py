@@ -17,19 +17,14 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- VIVE BRAND THEME (High Performance CSS) ---
+# --- VIVE BRAND THEME (Clean, Minimalist, High Performance) ---
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;800&family=Open+Sans:wght@400;600&display=swap');
 
-    /* GLOBAL PERFORMANCE & THEME */
+    /* GLOBAL RESET & PERFORMANCE */
     .stApp {
-        background-color: #0B1E3D !important;
-        background-image: 
-            radial-gradient(white, rgba(255,255,255,.08) 1px, transparent 20px),
-            radial-gradient(white, rgba(255,255,255,.05) 1px, transparent 20px);
-        background-size: 350px 350px, 200px 200px; 
-        background-position: 0 0, 40px 60px;
+        background-color: #0B1E3D !important; /* VIVE Deep Navy */
         color: #ffffff !important;
         font-family: 'Open Sans', sans-serif;
     }
@@ -39,67 +34,62 @@ st.markdown("""
         font-family: 'Montserrat', sans-serif !important;
         font-weight: 800 !important;
         text-transform: uppercase;
-        letter-spacing: 1.5px;
+        letter-spacing: 1px;
         color: #ffffff !important;
+        margin-bottom: 0.5rem;
     }
     
     h1 {
-        background: linear-gradient(90deg, #00C6D7 0%, #ffffff 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        font-size: 2.8rem !important;
+        color: #00C6D7 !important; /* VIVE Teal */
+        font-size: 2.5rem !important;
     }
 
-    /* COMPONENT STYLING */
+    /* CARDS (Clean Navy, No Transparency) */
     .stContainer, div[data-testid="metric-container"], .report-box {
-        background-color: #132448 !important;
-        border: 1px solid rgba(0, 198, 215, 0.25);
-        border-radius: 6px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        background-color: #132448 !important; /* Slightly lighter Navy */
+        border: 1px solid #1e293b;
+        border-radius: 4px;
         padding: 20px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.2); /* Minimal shadow for performance */
     }
     
     /* METRICS */
     div[data-testid="metric-container"] {
         border-left: 4px solid #00C6D7;
-        transition: transform 0.2s;
-    }
-    div[data-testid="metric-container"]:hover {
-        transform: translateY(-3px);
-        border-color: #ffffff;
     }
     div[data-testid="metric-container"] label {
         color: #00C6D7 !important;
         font-weight: 700;
         font-family: 'Montserrat', sans-serif !important;
+        font-size: 0.85rem;
     }
     div[data-testid="metric-container"] div[data-testid="stMetricValue"] {
         color: white !important;
         font-weight: 800;
+        font-size: 2rem;
     }
 
     /* SIDEBAR */
     section[data-testid="stSidebar"] {
-        background-color: #050E1F !important;
+        background-color: #050E1F !important; /* Darkest Navy */
         border-right: 1px solid #1e293b;
     }
     
-    /* BUTTONS (High Speed Interaction) */
+    /* BUTTONS (High Contrast, Fast Load) */
     .stButton>button {
-        background: #00C6D7 !important;
+        background-color: #00C6D7 !important;
         color: #050E1F !important;
         border: none;
         font-family: 'Montserrat', sans-serif !important;
-        font-weight: 800 !important;
+        font-weight: 700 !important;
         text-transform: uppercase;
         border-radius: 4px;
-        height: 3.2em;
-        transition: all 0.2s ease-in-out;
+        height: 3em;
+        transition: opacity 0.1s ease-in; /* Simple transition */
     }
     .stButton>button:hover {
-        background: #ffffff !important;
-        color: #00C6D7 !important;
-        box-shadow: 0 0 15px rgba(0, 198, 215, 0.5);
+        opacity: 0.9;
+        box-shadow: none; /* Removed complex shadows for speed */
     }
 
     /* INPUTS */
@@ -107,20 +97,23 @@ st.markdown("""
         background-color: #1B3B6F !important;
         color: white !important;
         border: 1px solid #475569;
+        border-radius: 4px;
     }
     
     /* FOOTER STYLE */
     .footer-text {
         font-family: 'Montserrat', sans-serif;
-        font-size: 0.75rem;
+        font-size: 0.7rem;
         color: #5d6d8a;
         text-align: center;
-        margin-top: 20px;
+        margin-top: 30px;
+        border-top: 1px solid #1e293b;
+        padding-top: 10px;
     }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. CACHED INTELLIGENCE ENGINE (SPEED OPTIMIZED) ---
+# --- 2. ROBUST & PERSISTENT INTELLIGENCE ENGINE ---
 class IntelligenceEngine:
     def __init__(self):
         self.available = False
@@ -129,38 +122,46 @@ class IntelligenceEngine:
         self._initialize_clients()
 
     def _initialize_clients(self):
-        # Check for Manual Key Override First (User Priority)
-        if 'user_api_key' in st.session_state and st.session_state.user_api_key:
-            self.configure(st.session_state.user_api_key)
-            return
-
-        # Auto-Discovery logic
+        """Initialize AI clients with persistent session state backup"""
         try:
+            import google.generativeai as genai
+            self.genai = genai
+            
             api_key = None
+            
+            # 1. Check Streamlit Secrets (Priority)
             if 'GEMINI_API_KEY' in st.secrets:
                 api_key = st.secrets['GEMINI_API_KEY']
             elif 'GOOGLE_API_KEY' in st.secrets:
                 api_key = st.secrets['GOOGLE_API_KEY']
             
+            # 2. Check Environment
             if not api_key:
                 api_key = os.environ.get("GEMINI_API_KEY")
             
+            # 3. Check Persistent Session State (Manual Override)
+            if not api_key and 'manual_api_key' in st.session_state:
+                api_key = st.session_state.manual_api_key
+
             if api_key:
                 self.configure(api_key)
             else:
                 self.available = False
-        except Exception:
+                
+        except ImportError:
+            st.error("Google Generative AI library not found.")
+            self.available = False
+        except Exception as e:
+            # Fail silently to UI to avoid crashing app, show offline status instead
             self.available = False
 
     def configure(self, key):
         try:
-            import google.generativeai as genai
-            genai.configure(api_key=key)
-            self.model = genai.GenerativeModel('gemini-2.5-flash-preview-09-2025')
-            self.vision = genai.GenerativeModel('gemini-2.5-flash-preview-09-2025')
+            self.genai.configure(api_key=key)
+            self.model = self.genai.GenerativeModel('gemini-2.5-flash-preview-09-2025')
+            self.vision = self.genai.GenerativeModel('gemini-2.5-flash-preview-09-2025')
             self.available = True
-        except Exception as e:
-            print(f"AI Init Error: {e}")
+        except Exception:
             self.available = False
 
     def generate(self, prompt):
@@ -177,31 +178,30 @@ class IntelligenceEngine:
         except Exception as e:
             return f"Error: {e}"
 
-# Initialize AI only once per run
+# Initialize AI Singleton
 if 'ai' not in st.session_state:
     st.session_state.ai = IntelligenceEngine()
 
 # --- 3. CACHED DATA PARSER (SPEED OPTIMIZED) ---
 class DataParser:
     @staticmethod
-    @st.cache_data(show_spinner=False) # CACHING ENABLED FOR SPEED
+    @st.cache_data(show_spinner=False) # Cache results to prevent re-processing on every click
     def process_file(file_content, file_name):
         """
-        Processes file content. Arguments are passed as bytes/strings to allow caching.
+        Processes file content. Accepts bytes to allow Streamlit caching.
         """
         try:
-            # Convert bytes back to IO for reading
             file_io = io.BytesIO(file_content)
             
-            # Read structure
+            # Fast Header Detection
             content_str = file_content.decode("utf-8", errors='replace')
             lines = content_str.split('\n')
-            
-            # Smart Header Detection
             keywords = ['product', 'sku', 'date', 'qty', 'sales', 'return', 'ticket', 'stage']
             best_idx = 0
             max_score = 0
-            for i, line in enumerate(lines[:25]):
+            
+            # Limit scan to first 20 lines for speed
+            for i, line in enumerate(lines[:20]):
                 score = sum(1 for k in keywords if k in line.lower())
                 if score > max_score:
                     max_score = score
@@ -237,7 +237,7 @@ class DataParser:
 
 def render_dashboard():
     st.markdown("<h1>O.R.I.O.N. <span style='font-size:1rem; color:#00C6D7'>v6.3</span></h1>", unsafe_allow_html=True)
-    st.markdown("<div style='color:#00C6D7; letter-spacing:2px; margin-bottom:20px; font-family:Montserrat'>OPERATIONAL REVIEW & INTELLIGENCE OPTIMIZATION NETWORK</div>", unsafe_allow_html=True)
+    st.markdown("<div style='color:#00C6D7; letter-spacing:1px; margin-bottom:20px; font-family:Montserrat; font-weight:600'>OPERATIONAL REVIEW & INTELLIGENCE OPTIMIZATION NETWORK</div>", unsafe_allow_html=True)
     
     if 'orion_data' not in st.session_state: st.session_state.orion_data = None
     
@@ -247,15 +247,15 @@ def render_dashboard():
             st.info("📡 **SYSTEM READY**")
             f = st.file_uploader("UPLOAD OPERATIONAL DATA (CSV/XLSX)", type=['csv', 'xlsx'])
             if f:
-                # Pass bytes to cached function
+                # Read bytes once for caching
                 bytes_data = f.getvalue()
-                with st.spinner("PARSING & INDEXING..."):
+                with st.spinner("PARSING..."):
                     df, err = DataParser.process_file(bytes_data, f.name)
                     if err: st.error(err)
                     else:
                         st.session_state.orion_data = df
                         st.success("SIGNAL LOCKED")
-                        time.sleep(0.5)
+                        time.sleep(0.2) # Short pause for UX
                         st.rerun()
         with c2:
             st.markdown("### CAPABILITIES")
@@ -292,14 +292,15 @@ def render_dashboard():
                     fig.update_layout(
                         template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                         yaxis2=dict(overlaying='y', side='right'), legend=dict(orientation="h", y=1.1),
-                        margin=dict(l=20, r=20, t=20, b=20), height=350
+                        margin=dict(l=20, r=20, t=20, b=20), height=350,
+                        font=dict(family="Open Sans")
                     )
                     st.plotly_chart(fig, use_container_width=True)
         
         with c2:
             st.markdown("### 🧠 NEURAL ANALYST")
             if st.button("RUN HYPOTHESIS", type="primary"):
-                with st.spinner("ANALYZING PATTERNS..."):
+                with st.spinner("ANALYZING..."):
                     summ = df.describe().to_string()
                     prompt = f"Analyze this data summary: {summ}. Find anomalies in Return Rate and suggest 1 Root Cause."
                     st.info(st.session_state.ai.generate(prompt))
@@ -318,7 +319,7 @@ def render_voc():
         if img:
             st.image(img, caption="Target", use_column_width=True)
             if st.button("INITIATE SCAN", type="primary"):
-                with st.spinner("PROCESSING PIXELS..."):
+                with st.spinner("SCANNING..."):
                     prompt = "Extract: 1. Metrics 2. Top Defects 3. Sentiment 4. Recommendation."
                     st.session_state.voc_res = st.session_state.ai.analyze_vision(Image.open(img), prompt)
     
@@ -423,15 +424,16 @@ def main():
         st.title("O.R.I.O.N.")
         st.caption("VIVE HEALTH v6.3")
         
-        # STATUS INDICATOR
+        # --- AI STATUS & KEY HANDLER ---
         if st.session_state.ai.available:
-            st.success("🟢 NEURAL ENGINE ONLINE")
+            st.success("🟢 SYSTEM ONLINE")
         else:
-            st.error("🔴 NEURAL ENGINE OFFLINE")
-            key_input = st.text_input("ENTER API KEY", type="password", help="Gemini/Google Key")
-            if key_input:
-                st.session_state.user_api_key = key_input
-                st.session_state.ai.configure(key_input)
+            st.warning("🔴 AI OFFLINE")
+            # KEY INPUT (Persistent)
+            k = st.text_input("API KEY", type="password", help="Enter Gemini Key")
+            if k:
+                st.session_state.manual_api_key = k
+                st.session_state.ai.configure(k)
                 st.rerun()
         
         st.markdown("---")
@@ -445,7 +447,6 @@ def main():
                 st.rerun()
 
         # --- REQUESTED FOOTER ---
-        st.markdown("---")
         st.markdown("""
         <div class='footer-text'>
         built by alex popoff 11/19/2025<br>
