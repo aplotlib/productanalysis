@@ -21,22 +21,11 @@ st.set_page_config(
 st.markdown("""
     <style>
     /* IMPORT FONTS */
-    /* Montserrat (Simulates Redzone for Headers) & Open Sans (Body) */
     @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;800&family=Open+Sans:wght@400;600&display=swap');
-
-    /* --- COLOR PALETTE ---
-       Primary: #00C6D7 (Vive Teal)
-       Secondary: #0B1E3D (Vive Deep Navy)
-       Accent: #FFFFFF (White)
-       Success: #00E676
-       Warning: #FFEA00
-       Error: #FF1744
-    */
 
     /* GLOBAL RESET */
     .stApp {
         background-color: #0B1E3D !important; /* Vive Navy */
-        /* Subtle Starfield Texture Overlay */
         background-image: 
             radial-gradient(white, rgba(255,255,255,.1) 1px, transparent 20px),
             radial-gradient(white, rgba(255,255,255,.05) 1px, transparent 20px);
@@ -51,7 +40,7 @@ st.markdown("""
         font-family: 'Montserrat', sans-serif !important;
         font-weight: 800 !important;
         text-transform: uppercase;
-        letter-spacing: 2px; /* Matches Redzone extended feel */
+        letter-spacing: 2px;
         color: #ffffff !important;
         margin-bottom: 10px;
     }
@@ -66,7 +55,7 @@ st.markdown("""
     .subtitle {
         font-family: 'Montserrat', sans-serif;
         font-size: 1.1rem;
-        color: #00C6D7; /* Vive Teal */
+        color: #00C6D7;
         letter-spacing: 1.5px;
         margin-bottom: 40px;
         border-bottom: 1px solid rgba(0, 198, 215, 0.3);
@@ -76,14 +65,14 @@ st.markdown("""
 
     p, li, label, div, span {
         font-family: 'Open Sans', sans-serif !important;
-        color: #e2e8f0; /* Off-white for body text comfort */
+        color: #e2e8f0;
     }
 
-    /* CONTAINERS (High Contrast Cards) */
+    /* CONTAINERS */
     .stContainer, div[data-testid="metric-container"], .report-box {
-        background-color: #132448 !important; /* Slightly lighter Navy */
-        border: 1px solid rgba(0, 198, 215, 0.2); /* Teal Border */
-        border-radius: 4px; /* Sharper corners for professional look */
+        background-color: #132448 !important;
+        border: 1px solid rgba(0, 198, 215, 0.2);
+        border-radius: 4px;
         box-shadow: 0 4px 20px rgba(0,0,0,0.4);
         padding: 24px;
     }
@@ -108,14 +97,14 @@ st.markdown("""
 
     /* SIDEBAR */
     section[data-testid="stSidebar"] {
-        background-color: #050E1F !important; /* Darkest Navy */
+        background-color: #050E1F !important;
         border-right: 1px solid #1e293b;
     }
     
-    /* BUTTONS (Vive Brand Primary) */
+    /* BUTTONS */
     .stButton>button {
-        background: #00C6D7 !important; /* Brand Teal */
-        color: #050E1F !important; /* Navy Text */
+        background: #00C6D7 !important;
+        color: #050E1F !important;
         border: none;
         border-radius: 4px;
         font-family: 'Montserrat', sans-serif !important;
@@ -124,7 +113,7 @@ st.markdown("""
         letter-spacing: 1px;
         height: 3.5em;
         transition: all 0.3s ease;
-        box-shadow: 0 4px 0 #0097a7; /* 3D Effect */
+        box-shadow: 0 4px 0 #0097a7;
     }
     .stButton>button:hover {
         background: #ffffff !important;
@@ -132,22 +121,14 @@ st.markdown("""
         box-shadow: 0 0 20px rgba(0, 198, 215, 0.6);
         transform: translateY(-2px);
     }
-    .stButton>button:active {
-        transform: translateY(2px);
-        box-shadow: none;
-    }
 
-    /* FORM INPUTS */
+    /* INPUTS */
     .stTextInput input, .stSelectbox div[data-baseweb="select"] div, .stTextArea textarea {
-        background-color: #1B3B6F !important; /* Lighter Navy Input */
+        background-color: #1B3B6F !important;
         color: white !important;
         border: 1px solid #475569;
         border-radius: 4px;
         font-family: 'Open Sans', sans-serif;
-    }
-    .stTextInput input:focus, .stTextArea textarea:focus {
-        border-color: #00C6D7 !important;
-        box-shadow: 0 0 0 1px #00C6D7;
     }
 
     /* TABS */
@@ -173,31 +154,43 @@ class IntelligenceEngine:
         self.available = False
         self.model = None
         self.vision = None
-        self._initialize_ai_clients()
-
-    def _initialize_ai_clients(self):
-        """Initialize AI clients from Streamlit secrets or Env"""
+        
+        # Import GenAI safely
         try:
             import google.generativeai as genai
             self.genai = genai
-            
+        except ImportError:
+            st.error("Google Generative AI library not installed. Please add 'google-generativeai' to requirements.txt")
+            return
+
+        # Check session state for manually entered key first
+        if 'manual_api_key' in st.session_state and st.session_state.manual_api_key:
+            self.configure(st.session_state.manual_api_key)
+        else:
+            self._initialize_ai_clients()
+
+    def _initialize_ai_clients(self):
+        """Initialize AI clients from Streamlit secrets (Requested Pattern)"""
+        try:
             api_key = None
-            # Priority: Secrets > Env
+            # Check Streamlit Secrets for preferred keys
             if 'GEMINI_API_KEY' in st.secrets:
                 api_key = st.secrets['GEMINI_API_KEY']
             elif 'GOOGLE_API_KEY' in st.secrets:
                 api_key = st.secrets['GOOGLE_API_KEY']
             
+            # Fallback to Environment Variable
             if not api_key:
                 api_key = os.environ.get("GEMINI_API_KEY")
             
             if api_key:
                 self.configure(api_key)
             else:
+                # Fail silently here, UI will show "Offline" status
                 self.available = False
                 
         except Exception as e:
-            st.sidebar.error(f"System Error: {e}")
+            st.sidebar.error(f"Error initializing AI clients: {e}")
             self.available = False
 
     def configure(self, key):
@@ -206,23 +199,25 @@ class IntelligenceEngine:
             self.model = self.genai.GenerativeModel('gemini-2.5-flash-preview-09-2025')
             self.vision = self.genai.GenerativeModel('gemini-2.5-flash-preview-09-2025')
             self.available = True
-        except Exception:
+        except Exception as e:
+            st.sidebar.error(f"Configuration Failed: {e}")
             self.available = False
 
     def generate(self, prompt):
-        if not self.available: return "⚠️ Intelligence Offline."
+        if not self.available: return "⚠️ Intelligence Offline. Check API Key."
         try:
             return self.model.generate_content(prompt).text
         except Exception as e:
             return f"Analysis Error: {e}"
 
     def analyze_vision(self, image, prompt):
-        if not self.available: return "⚠️ Intelligence Offline."
+        if not self.available: return "⚠️ Intelligence Offline. Check API Key."
         try:
             return self.vision.generate_content([prompt, image]).text
         except Exception as e:
             return f"Vision Error: {e}"
 
+# Initialize AI (ensure it persists)
 if 'ai' not in st.session_state: st.session_state.ai = IntelligenceEngine()
 
 # --- 3. DATA PARSER ---
@@ -452,14 +447,17 @@ def render_capa():
 def main():
     with st.sidebar:
         st.title("O.R.I.O.N.")
-        st.caption("VIVE HEALTH v6.0 | INTERNAL")
+        st.caption("VIVE HEALTH v5.2 | INTERNAL")
         
+        # Robust API Key Handling
         if st.session_state.ai.available:
             st.success("🟢 ONLINE")
         else:
             st.error("🔴 OFFLINE")
+            # Manual Override that writes to session state
             k = st.text_input("ACCESS KEY", type="password")
-            if k: 
+            if k:
+                st.session_state.manual_api_key = k
                 st.session_state.ai.configure(k)
                 st.rerun()
         
