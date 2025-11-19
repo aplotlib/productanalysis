@@ -3,64 +3,55 @@ import re
 import io
 
 class ReturnReportProcessor:
-    def __init__(self):
-        # Regex to identify the "Month Year" rows (e.g., "August 2020")
-        self.date_pattern = re.compile(r'^\s*[A-Z][a-z]+ \d{4}$')
-        # Regex to identify Product rows (e.g., "[MOB1001] Folding Cane")
-        self.product_pattern = re.compile(r'^\s*\[(.*?)\]\s*(.*)')
-
+    """
+    Handles complex hierarchical Odoo Pivot Exports.
+    """
     def process(self, file_content):
-        """
-        Parses the hierarchical Odoo Pivot Report for Returns.
-        """
-        # Read without header because headers are multi-row and messy
-        if isinstance(file_content, bytes):
-            df = pd.read_csv(io.BytesIO(file_content), header=None)
-        else:
-            df = pd.read_csv(file_content, header=None)
-
+        # Read without header to handle the nested structure
+        df = pd.read_csv(io.BytesIO(file_content), header=None)
+        
         cleaned_data = []
         current_date = None
         
-        # Iterate row by row to handle the hierarchy
+        # Regex to detect "Month Year" rows (e.g., "August 2020")
+        date_pattern = re.compile(r'^\s*[A-Z][a-z]+ \d{4}$')
+        
         for index, row in df.iterrows():
-            col0_text = str(row[0])
+            col0 = str(row[0])
             
-            # 1. Detect Date Header (Top level hierarchy)
-            if self.date_pattern.match(col0_text):
-                current_date = col0_text.strip()
+            # 1. Detect Date Group
+            if date_pattern.match(col0):
+                current_date = col0.strip()
                 continue
-            
-            # 2. Detect Product Row (Nested hierarchy)
-            match = self.product_pattern.search(col0_text)
-            if match and current_date:
-                sku = match.group(1)
-                product_name = match.group(2)
                 
-                # Map columns based on your file structure:
-                # Col 1: B2B, Col 2: FBM, Col 3: Shopify (Indices 1, 2, 3)
-                # Using pd.to_numeric to handle empty strings/NaNs safely
-                def get_val(idx):
-                    try:
-                        val = row[idx]
-                        return float(val) if pd.notna(val) and str(val).strip() != '' else 0.0
-                    except:
-                        return 0.0
-
-                b2b_qty = get_val(1)
-                fbm_qty = get_val(2)
-                shopify_qty = get_val(3)
-                
-                # Only add if there is return data
-                if b2b_qty + fbm_qty + shopify_qty > 0:
-                    cleaned_data.append({
-                        'Date': current_date,
-                        'SKU': sku,
-                        'Product Name': product_name,
-                        'B2B Returns': b2b_qty,
-                        'FBM Returns': fbm_qty,
-                        'Shopify Returns': shopify_qty,
-                        'Total Returns': b2b_qty + fbm_qty + shopify_qty
-                    })
+            # 2. Detect Product Row: "     [MOB1001] Folding Cane"
+            # We look for the brackets [SKU]
+            if "[" in col0 and "]" in col0:
+                try:
+                    # Extract SKU between brackets
+                    start = col0.find("[") + 1
+                    end = col0.find("]")
+                    sku = col0[start:end]
+                    product_name = col0[end+1:].strip()
+                    
+                    # Assuming columns: 0=Name, 1=B2B, 2=FBM, 3=Shopify (Adjust if needed based on file)
+                    total = 0
+                    # Sum specific columns if they exist and are numeric
+                    for i in [1, 2, 3]: 
+                        if i < len(row) and pd.notna(row[i]):
+                            try:
+                                total += float(row[i])
+                            except:
+                                pass
+                    
+                    if total > 0:
+                        cleaned_data.append({
+                            'Date': current_date,
+                            'SKU': sku,
+                            'Product Name': product_name,
+                            'Total Returns': total
+                        })
+                except:
+                    continue
 
         return pd.DataFrame(cleaned_data)
