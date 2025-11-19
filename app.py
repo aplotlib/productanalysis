@@ -1,136 +1,281 @@
 import streamlit as st
 import pandas as pd
+import plotly.express as px
+from PIL import Image
+from datetime import datetime
+
+# --- CUSTOM MODULES ---
 from odoo_processor import OdooProcessor
 from return_processor import ReturnReportProcessor
+from enhanced_ai_analysis import IntelligenceEngine
 
-# --- CONFIGURATION ---
-st.set_page_config(page_title="Product Intelligence HQ", layout="wide")
+# --- 1. SYSTEM CONFIGURATION ---
+st.set_page_config(
+    page_title="ORION | Product Intelligence",
+    page_icon="🧬",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# Custom CSS for "Powerful" Look
+# --- 2. PROFESSIONAL UI THEME ---
 st.markdown("""
-<style>
-    .stApp { background-color: #f8f9fa; }
-    div[data-testid="metric-container"] {
-        background-color: white;
-        border: 1px solid #e0e0e0;
-        padding: 15px;
-        border-radius: 8px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap');
+    :root { --primary: #0F172A; --accent: #2563EB; --bg: #F8FAFC; }
+    .stApp { background-color: var(--bg); font-family: 'Inter', sans-serif; }
+    
+    /* Card Styling */
+    .metric-card {
+        background: white; border: 1px solid #E2E8F0; 
+        border-radius: 10px; padding: 20px; 
+        box-shadow: 0 2px 4px rgba(0,0,0,0.02);
     }
-    h1 { color: #1e293b; }
-    h3 { color: #334155; }
-</style>
+    .metric-value { font-size: 24px; font-weight: 800; color: var(--primary); }
+    .metric-label { font-size: 14px; color: #64748B; font-weight: 500; }
+    
+    /* Headers */
+    h1, h2, h3 { color: var(--primary); font-weight: 700; letter-spacing: -0.5px; }
+    
+    /* Tabs */
+    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
+    .stTabs [data-baseweb="tab"] { 
+        height: 45px; background-color: white; border-radius: 6px; 
+        border: 1px solid #E2E8F0; padding: 0 20px; 
+    }
+    .stTabs [aria-selected="true"] { 
+        background-color: var(--accent); color: white; border-color: var(--accent); 
+    }
+    </style>
 """, unsafe_allow_html=True)
 
-def main():
-    st.title("🚀 Product Intelligence HQ")
-    st.markdown("### Centralized Quality & Performance Analytics")
+# --- 3. INITIALIZATION ---
+if 'ai' not in st.session_state: st.session_state.ai = IntelligenceEngine()
+if 'master_data' not in st.session_state: st.session_state.master_data = pd.DataFrame()
 
-    # Initialize Processors
-    odoo_proc = OdooProcessor()
-    return_proc = ReturnReportProcessor()
+odoo_proc = OdooProcessor()
+return_proc = ReturnReportProcessor()
 
-    # --- SIDEBAR: UPLOAD CENTER ---
+# --- 4. SIDEBAR ---
+def render_sidebar():
     with st.sidebar:
-        st.header("Data Ingestion")
-        st.info("Upload your Odoo exports here. The app will automatically link them.")
+        st.title("🧬 ORION v2.1")
+        st.caption("Product Intelligence System")
+        st.markdown("---")
         
-        uploaded_files = st.file_uploader(
-            "Drop Files (Inventory, Returns, Helpdesk)", 
-            accept_multiple_files=True,
-            type=['csv', 'xlsx']
+        # AI Configuration
+        st.subheader("🧠 Intelligence Core")
+        model_choice = st.selectbox("AI Model", 
+            ["Google Gemini 1.5 Flash", "Google Gemini 1.5 Pro", "OpenAI GPT-4o"], 
+            index=0
+        )
+        
+        # Auto-detect key or ask user
+        manual_key = None
+        if "Gemini" in model_choice and "GEMINI_API_KEY" not in st.secrets:
+            manual_key = st.text_input("API Key", type="password", help="Enter Google AI Key")
+        elif "GPT" in model_choice and "OPENAI_API_KEY" not in st.secrets:
+            manual_key = st.text_input("API Key", type="password")
+            
+        st.session_state.ai.configure_client(model_choice, manual_key)
+        
+        if st.session_state.ai.available:
+            st.success(f"● {model_choice} Online")
+        else:
+            st.error("● AI Offline")
+            
+        st.markdown("---")
+        return st.radio("Navigation", ["Dashboard", "Data Ingestion", "Vision Analysis", "CAPA Manager"], label_visibility="collapsed")
+
+# --- 5. MODULES ---
+
+def render_ingestion():
+    st.header("📂 Data Ingestion")
+    st.markdown("Upload your raw Odoo exports and Return reports. The system will auto-clean and link them.")
+    
+    uploaded_files = st.file_uploader("Drop Files (Inventory, Helpdesk, Returns)", accept_multiple_files=True)
+    
+    if st.button("Process Files", type="primary"):
+        if not uploaded_files:
+            st.warning("Please upload files first.")
+            return
+
+        with st.spinner("Processing & Linking Data..."):
+            inv_df = pd.DataFrame()
+            help_df = pd.DataFrame()
+            ret_df = pd.DataFrame()
+            
+            # 1. Load Inventory (Master Key)
+            for f in uploaded_files:
+                if "Inventory" in f.name:
+                    inv_df = odoo_proc.load_inventory_master(f.getvalue())
+                    st.toast(f"Inventory: {len(inv_df)} records", icon="✅")
+            
+            # 2. Load Others
+            for f in uploaded_files:
+                try:
+                    if "Inventory" in f.name: continue
+                    
+                    if "Helpdesk" in f.name:
+                        help_df = odoo_proc.process_helpdesk(f.getvalue())
+                        st.toast(f"Tickets: {len(help_df)} loaded", icon="🎫")
+                    
+                    elif "Return" in f.name or "Pivot" in f.name:
+                        ret_df = return_proc.process(f.getvalue())
+                        st.toast(f"Returns: {len(ret_df)} loaded", icon="📉")
+                except Exception as e:
+                    st.error(f"Failed to parse {f.name}: {e}")
+
+            # 3. Merge
+            if not inv_df.empty:
+                merged = odoo_proc.merge_data(inv_df, help_df, ret_df)
+                st.session_state.master_data = merged
+                st.success(f"Successfully merged {len(merged)} Product SKUs.")
+            else:
+                st.error("Inventory Forecast file is required as the Master Key.")
+
+def render_dashboard():
+    st.header("📊 Executive Dashboard")
+    
+    df = st.session_state.master_data
+    if df.empty:
+        st.info("No data loaded. Go to 'Data Ingestion' to begin.")
+        return
+
+    # 1. Top Metrics
+    total_returns = df['Total Returns'].sum() if 'Total Returns' in df else 0
+    total_tickets = df['Ticket Count'].sum() if 'Ticket Count' in df else 0
+    risky_products = len(df[(df.get('Total Returns', 0) > 5) | (df.get('Ticket Count', 0) > 5)])
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total SKUs", len(df))
+    c2.metric("Total Returns", int(total_returns))
+    c3.metric("Support Tickets", int(total_tickets))
+    c4.metric("High Risk Items", risky_products, delta_color="inverse")
+    
+    st.markdown("---")
+
+    # 2. High Risk Analysis
+    c_left, c_right = st.columns([2, 1])
+    
+    with c_left:
+        st.subheader("Top Products by Issue Volume")
+        if 'Total Returns' in df.columns and 'Ticket Count' in df.columns:
+            df['Combined Risk'] = df['Total Returns'] + df['Ticket Count']
+            top_risk = df.sort_values('Combined Risk', ascending=False).head(10)
+            
+            fig = px.bar(
+                top_risk, 
+                x='Product SKU', 
+                y=['Total Returns', 'Ticket Count'],
+                title="Returns vs Tickets (Top 10)",
+                barmode='group',
+                color_discrete_sequence=['#EF4444', '#3B82F6']
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # AI Insight Button
+            if st.button("🤖 Analyze Trends"):
+                with st.spinner("AI Analyzing..."):
+                    data_summary = top_risk[['Product SKU', 'Total Returns', 'Ticket Count', 'Product Title']].to_string()
+                    insight = st.session_state.ai.generate(
+                        f"Analyze this product risk data. Identify patterns in returns vs tickets. Suggest 3 focus areas.\n{data_summary}"
+                    )
+                    st.info(insight)
+
+    with c_right:
+        st.subheader("Watchlist")
+        st.dataframe(
+            df[['Product SKU', 'Total Returns', 'Ticket Count']].sort_values('Total Returns', ascending=False).head(15),
+            hide_index=True,
+            use_container_width=True
         )
 
-    if not uploaded_files:
-        st.warning("waiting for data... Upload 'Inventory Forecast', 'Helpdesk Tickets', or 'Return Reports' to begin.")
-        st.stop()
-
-    # --- DATA PROCESSING ENGINE ---
-    inventory_df = pd.DataFrame()
-    helpdesk_df = pd.DataFrame()
-    returns_df = pd.DataFrame()
-
-    # 1. Process Inventory FIRST (Master Key)
-    for file in uploaded_files:
-        if "Inventory" in file.name:
-            with st.spinner("Indexing Inventory..."):
-                inventory_df = odoo_proc.load_inventory_master(file.getvalue())
-            st.toast(f"Inventory Loaded: {len(inventory_df)} SKUs", icon="✅")
-
-    # 2. Process Other Files
-    for file in uploaded_files:
-        try:
-            if "Inventory" in file.name:
-                continue # Already done
-            
-            elif "Return" in file.name or "Pivot" in file.name:
-                returns_df = return_proc.process(file.getvalue())
-                st.toast(f"Parsed Returns: {len(returns_df)} records", icon="📉")
-
-            elif "Helpdesk" in file.name:
-                helpdesk_df = odoo_proc.process_helpdesk(file.getvalue())
-                st.toast(f"Parsed Tickets: {len(helpdesk_df)} tickets", icon="🎫")
-                
-        except Exception as e:
-            st.error(f"Error processing {file.name}: {str(e)}")
-
-    # --- THE INTELLIGENCE DASHBOARD ---
+def render_vision():
+    st.header("👁️ Vision Diagnostics")
+    st.markdown("Upload photos of defects or products for AI analysis.")
     
-    # 1. Top Level Metrics
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Active SKUs", len(inventory_df) if not inventory_df.empty else "0")
-    col2.metric("Total Returns Logged", int(returns_df['Total Returns'].sum()) if not returns_df.empty else "0")
-    col3.metric("Support Tickets", len(helpdesk_df) if not helpdesk_df.empty else "0")
-
-    st.divider()
-
-    # 2. The "Master Merge" View
-    if not inventory_df.empty and (not helpdesk_df.empty or not returns_df.empty):
-        st.subheader("🔥 High-Risk Products (Combined Data)")
+    img_file = st.file_uploader("Upload Image", type=['png', 'jpg', 'jpeg'])
+    
+    if img_file:
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            st.image(img_file, caption="Uploaded Artifact", use_column_width=True)
         
-        # Merge data
-        master_data = odoo_proc.merge_data(inventory_df, helpdesk_df, returns_df)
+        with col2:
+            prompt = st.text_area("Instruction", "Analyze this product image. Describe any visible defects, wear, or quality issues. Assess severity (Low/Medium/High).")
+            if st.button("Analyze Artifact"):
+                with st.spinner("Vision Engine Processing..."):
+                    image = Image.open(img_file)
+                    result = st.session_state.ai.analyze_image(image, prompt)
+                    st.markdown("### Findings")
+                    st.write(result)
+                    
+                    # Integration: Send to CAPA
+                    if st.button("Create CAPA from Findings"):
+                        st.session_state.capa_prefill = {'desc': result, 'sku': 'FROM_IMAGE'}
+                        st.success("Findings sent to CAPA Manager.")
+
+def render_capa():
+    st.header("🛡️ CAPA Manager")
+    st.caption("Corrective And Preventive Action Workflow")
+    
+    # Initialize Session Data
+    if 'capa_data' not in st.session_state: 
+        st.session_state.capa_data = {
+            'id': f"CAPA-{datetime.now().strftime('%y%m%d')}-{datetime.now().second}",
+            'status': 'Draft'
+        }
+    
+    data = st.session_state.capa_data
+    
+    # Check for prefill from Vision
+    if 'capa_prefill' in st.session_state:
+        data['desc'] = st.session_state.capa_prefill.get('desc')
+        data['sku'] = st.session_state.capa_prefill.get('sku')
+        del st.session_state.capa_prefill
+
+    t1, t2 = st.tabs(["📝 Investigation", "📋 Formal Report"])
+    
+    with t1:
+        c1, c2 = st.columns(2)
+        data['id'] = c1.text_input("Reference ID", data['id'])
+        data['sku'] = c2.text_input("Product SKU", data.get('sku', ''))
+        data['desc'] = st.text_area("Problem Description", data.get('desc', ''), height=150)
         
-        if not master_data.empty:
-            # Calculate a "Risk Score"
-            # Simple logic: Returns + Tickets = Pain
-            master_data['Risk Score'] = master_data['Ticket Count'] + master_data['Total Returns']
+        if st.button("✨ Auto-Draft Investigation"):
+            with st.spinner("AI Consultant is drafting report..."):
+                draft = st.session_state.ai.generate_capa_draft({'product': data['sku'], 'issue': data['desc']})
+                if draft:
+                    data.update(draft)
+                    st.success("Draft Generated Successfully!")
+                    st.rerun()
+
+    with t2:
+        if data.get('root_cause_analysis'):
+            st.markdown(f"### CAPA Report: {data['id']}")
+            st.markdown("---")
+            st.markdown(f"**Root Cause Analysis:**\n{data.get('root_cause_analysis')}")
+            st.markdown(f"**Immediate Action:**\n{data.get('immediate_action')}")
+            st.markdown(f"**Corrective Action:**\n{data.get('corrective_action')}")
+            st.markdown(f"**Effectiveness Check:**\n{data.get('effectiveness_check')}")
             
-            # Show Top 10 Worst Products
-            top_risk = master_data.sort_values('Risk Score', ascending=False).head(10)
-            
-            # Clean up columns for display
-            display_cols = ['Product SKU', 'Product Title', 'Ticket Count', 'Total Returns', 'Risk Score', 'On Hand']
-            # Only show columns that actually exist
-            final_cols = [c for c in display_cols if c in top_risk.columns]
-            
-            st.dataframe(
-                top_risk[final_cols],
-                use_container_width=True,
-                hide_index=True
+            st.download_button(
+                "Download JSON", 
+                data=json.dumps(data, indent=2), 
+                file_name=f"{data['id']}.json",
+                mime="application/json"
             )
-            
-            # Visual Chart
-            st.bar_chart(top_risk.set_index('Product SKU')['Risk Score'])
-            
         else:
-            st.info("Data merged but result was empty. Check SKU matching.")
+            st.info("Complete the Investigation tab to generate the formal report.")
 
-    # 3. Deep Dive Tabs
-    tab1, tab2 = st.tabs(["🎫 Helpdesk Intelligence", "📉 Return Analytics"])
+# --- MAIN EXECUTION ---
+def main():
+    nav = render_sidebar()
     
-    with tab1:
-        if not helpdesk_df.empty:
-            st.dataframe(helpdesk_df)
-            st.caption("Note: 'Inferred_SKU' is extracted from Ticket Subjects or Odoo IDs.")
-        else:
-            st.markdown("*Upload Helpdesk file to see ticket analysis*")
-
-    with tab2:
-        if not returns_df.empty:
-            st.dataframe(returns_df)
-        else:
-            st.markdown("*Upload Pivot Return Report to see return analysis*")
+    if nav == "Dashboard": render_dashboard()
+    elif nav == "Data Ingestion": render_ingestion()
+    elif nav == "Vision Analysis": render_vision()
+    elif nav == "CAPA Manager": render_capa()
 
 if __name__ == "__main__":
     main()
