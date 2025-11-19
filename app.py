@@ -234,6 +234,10 @@ class DataHandler:
                 'Return_Rate': rate,
                 'Issues': len(data['issues'])
             })
+        
+        # FIX: Ensure columns exist even if empty
+        if not rows:
+            return pd.DataFrame(columns=['Parent_SKU', 'Sales', 'Returns', 'Return_Rate', 'Issues']), warnings
             
         return pd.DataFrame(rows), warnings
 
@@ -300,7 +304,11 @@ def render_ingestion():
         st.success(f"Processed {len(df)} SKU Families.")
         
     if 'master_data' in st.session_state:
-        st.dataframe(st.session_state.master_data.sort_values('Return_Rate', ascending=False), use_container_width=True)
+        # FIX: Check if data exists before sorting
+        if not st.session_state.master_data.empty:
+            st.dataframe(st.session_state.master_data.sort_values('Return_Rate', ascending=False), use_container_width=True)
+        else:
+            st.info("Files processed but no matching records found. Check column names or date ranges.")
 
 def render_capa():
     st.markdown("### CAPA Manager")
@@ -328,7 +336,7 @@ def render_capa():
         
         if st.button("✨ Auto-Draft with AI"):
             with st.spinner("Drafting investigation plan..."):
-                prompt = f"Draft a CAPA investigation for {data['sku']}. Issue: {data['desc']}. JSON format."
+                prompt = f"Draft a CAPA investigation for {data.get('sku', 'Unknown Product')}. Issue: {data.get('desc', 'Not provided')}. JSON format."
                 res = st.session_state.ai.generate(prompt, json_mode=True)
                 if res: st.info("Draft generated (simulated populate)")
 
@@ -349,7 +357,7 @@ def render_capa():
             if data.get('fishbone'):
                 graph = graphviz.Digraph()
                 graph.attr(rankdir='LR')
-                graph.node('Problem', data['desc'][:20]+"...")
+                graph.node('Problem', (data.get('desc') or "Problem")[:20]+"...")
                 
                 for cat, cause in data['fishbone']:
                     graph.node(cat, cat, shape='box')
@@ -418,7 +426,7 @@ def render_vision():
 
 def render_dashboard():
     st.markdown("### Dashboard")
-    if 'master_data' in st.session_state:
+    if 'master_data' in st.session_state and not st.session_state.master_data.empty:
         df = st.session_state.master_data
         c1, c2, c3 = st.columns(3)
         c1.metric("Active SKUs", len(df))
@@ -430,6 +438,16 @@ def render_dashboard():
     else:
         st.info("Please load data in 'Data Ingestion' tab.")
 
+def render_strategy():
+    st.markdown("### Strategy & Compliance")
+    st.info("ISO 13485 Document Generator")
+    # Placeholder for document gen logic
+    doc_type = st.selectbox("Document Type", ["Quality Manual", "SOP", "Work Instruction"])
+    if st.button("Generate Template"):
+        with st.spinner("Generating..."):
+            res = st.session_state.ai.generate(f"Write a {doc_type} template for ISO 13485")
+            st.markdown(res)
+
 # --- MAIN ---
 def main():
     nav = render_sidebar()
@@ -437,7 +455,7 @@ def main():
     elif nav == "Data Ingestion": render_ingestion()
     elif nav == "CAPA Manager": render_capa()
     elif nav == "Vision": render_vision()
-    elif nav == "Strategy": st.info("Strategy Module Placeholder")
+    elif nav == "Strategy": render_strategy()
 
 if __name__ == "__main__":
     main()
