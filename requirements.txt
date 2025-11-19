@@ -1,49 +1,11 @@
-# Medical Device Customer Feedback Analyzer - PYTHON 3.13 COMPATIBLE
-# Version 4.0 - Production Ready
-# Streamlit Cloud & Python 3.13 Compatible
-
-# Core web framework - latest stable
 streamlit>=1.28.0,<1.35.0
-
-# Data processing - Python 3.13 compatible versions
 pandas>=2.0.0,<2.3.0
 numpy>=1.25.0,<2.0.0
-
-# Excel processing - essential for file uploads
 openpyxl>=3.1.0,<3.3.0
 xlsxwriter>=3.1.0,<3.3.0
-
-# AI and API integration - latest stable
 requests>=2.31.0,<3.0.0
 openai>=1.12.0,<2.0.0
-
-# Visualization - optional but recommended
 plotly>=5.17.0,<6.0.0
-
-# Date utilities - Python 3.13 compatible
 python-dateutil>=2.8.2,<3.0.0
-
-# Type hints support - Python 3.13 compatible
 typing-extensions>=4.8.0,<5.0.0
-
-# Image processing - optional (for future OCR features)
-# Pillow>=9.5.0,<10.1.0
-
-# Development tools (optional)
-# pytest>=7.2.0,<8.0.0
-
-# Installation Notes:
-# 1. Optimized for Streamlit Cloud deployment
-# 2. All versions tested for compatibility
-# 3. Core functionality works without optional dependencies
-# 4. AI features require OPENAI_API_KEY environment variable
-#
-# To install: pip install -r requirements.txt
-#
-# Environment Setup:
-# - Set OPENAI_API_KEY for AI analysis features
-# - All other features work without additional setup
-#
-# Streamlit Cloud Setup:
-# - Add openai_api_key to Streamlit secrets for AI features
-# - App will gracefully degrade if API key not available
+graphviz>=0.20.1,<0.21.0
