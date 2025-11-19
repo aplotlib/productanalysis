@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.express as px
 from PIL import Image
 from datetime import datetime
+import json
 
 # --- CUSTOM MODULES ---
 from odoo_processor import OdooProcessor
@@ -35,16 +36,6 @@ st.markdown("""
     
     /* Headers */
     h1, h2, h3 { color: var(--primary); font-weight: 700; letter-spacing: -0.5px; }
-    
-    /* Tabs */
-    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
-    .stTabs [data-baseweb="tab"] { 
-        height: 45px; background-color: white; border-radius: 6px; 
-        border: 1px solid #E2E8F0; padding: 0 20px; 
-    }
-    .stTabs [aria-selected="true"] { 
-        background-color: var(--accent); color: white; border-color: var(--accent); 
-    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -52,6 +43,7 @@ st.markdown("""
 if 'ai' not in st.session_state: st.session_state.ai = IntelligenceEngine()
 if 'master_data' not in st.session_state: st.session_state.master_data = pd.DataFrame()
 
+# Initialize Processors
 odoo_proc = OdooProcessor()
 return_proc = ReturnReportProcessor()
 
@@ -69,7 +61,6 @@ def render_sidebar():
             index=0
         )
         
-        # Auto-detect key or ask user
         manual_key = None
         if "Gemini" in model_choice and "GEMINI_API_KEY" not in st.secrets:
             manual_key = st.text_input("API Key", type="password", help="Enter Google AI Key")
